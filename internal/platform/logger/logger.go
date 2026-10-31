@@ -13,7 +13,8 @@ const ServiceName = "devices-api"
 
 // New returns a logger that writes to w in the configured format. Every
 // record carries the service name and version so logs from several
-// deployments can be told apart.
+// deployments can be told apart, and records logged with a context that
+// holds a span carry its trace_id and span_id.
 func New(cfg config.Log, w io.Writer, version string) *slog.Logger {
 	opts := &slog.HandlerOptions{Level: cfg.Level}
 
@@ -24,7 +25,7 @@ func New(cfg config.Log, w io.Writer, version string) *slog.Logger {
 		h = slog.NewJSONHandler(w, opts)
 	}
 
-	return slog.New(h).With(
+	return slog.New(traceHandler{h}).With(
 		slog.String("service", ServiceName),
 		slog.String("version", version),
 	)
