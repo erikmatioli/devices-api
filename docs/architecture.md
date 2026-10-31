@@ -154,6 +154,17 @@ Clarifications:
   - NOTIFY payloads are limited to 8 KB, which is far above the event size.
   - A durable alternative (transactional outbox and a broker such as NATS or
     Kafka) is listed under future improvements.
+- **Runtime details:**
+  - The listener uses its own connection, outside the request pool, tagged
+    `application_name=devices-api-listener`. It reconnects with exponential
+    backoff (0.5 s to 10 s) and pings an idle connection every 30 s so a
+    silently dropped link is noticed. `/readyz` reports it as
+    `events_listener`.
+  - Each stream has a buffer of `EVENTS_SUBSCRIBER_BUFFER` events, and a
+    replica accepts at most `EVENTS_MAX_SUBSCRIBERS` streams (`503` beyond).
+  - Streams clear the server write timeout, send a keep-alive comment every
+    15 s, and are closed on shutdown so the server can drain.
+  - `?device_id=` filters a stream to one device.
 - **Why SSE over WebSockets:** the stream only goes from server to client. SSE
   runs over plain HTTP, passes through proxies, reconnects automatically in
   browsers and can be tested with `curl`.

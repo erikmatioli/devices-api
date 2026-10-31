@@ -114,6 +114,8 @@ An invalid value stops the process with a message that lists every problem.
 | `IDEMPOTENCY_TTL` | `24h` | How long an `Idempotency-Key` response can be replayed |
 | `IDEMPOTENCY_LOCK_TIMEOUT` | `1m` | After this, a request still in progress is treated as abandoned; must exceed `HTTP_WRITE_TIMEOUT` |
 | `IDEMPOTENCY_PURGE_INTERVAL` | `15m` | How often expired records are deleted |
+| `EVENTS_MAX_SUBSCRIBERS` | `1000` | Concurrent event streams per replica; more get `503` |
+| `EVENTS_SUBSCRIBER_BUFFER` | `64` | Events queued for a slow stream before it is disconnected |
 | `HTTP_ADDR` | `:8080` | Listen address |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Time allowed to read request headers |
 | `HTTP_READ_TIMEOUT` | `10s` | Time allowed to read the whole request |
@@ -153,6 +155,20 @@ Then call the API:
 TOKEN=$(make -s token)
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/devices
 ```
+
+### Watching state changes
+
+```bash
+curl -N -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/devices/events
+# in another terminal
+curl -X PATCH -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/merge-patch+json" \
+     -d '{"state":"in-use"}' http://localhost:8080/v1/devices/<id>
+```
+
+Add `?device_id=<id>` to follow a single device. Notifications travel
+through PostgreSQL `LISTEN/NOTIFY`, so a change made through any replica
+reaches the streams of all replicas.
 
 In `/docs`, use **Authorize** and paste the token. The `tokengen` binary is
 built into a separate image target and is never shipped in the API image.
@@ -206,12 +222,14 @@ checks plus an image build.
 cmd/api/              entry point: wiring, HTTP server, graceful shutdown
 cmd/tokengen/         development helper that mints local access tokens
 internal/auth/        JWT verification (HS256 or JWKS) and the request principal
+internal/events/      state change event and the in-process fan-out hub
+internal/idempotency/ Idempotency-Key contract and in-memory store
 internal/device/      domain model and business rules (no I/O)
 internal/app/         use cases and the ports they need (repository interface)
 internal/app/apptest/ in-memory repository used by service and handler tests
 internal/platform/    configuration and logger
 internal/httpapi/     routes, middleware, request decoding, problem responses, docs
-internal/postgres/    pool, repository and embedded SQL migrations
+internal/postgres/    pool, repositories, LISTEN loop and embedded SQL migrations
 api/openapi.yaml      API contract, embedded and served at /openapi.yaml and /docs
 docs/                 architecture, flows and delivery plan
 ```
@@ -295,6 +313,8 @@ The binary reports its version in every log record (`version` field).
 | `-race requires cgo` | Install a C compiler, or run without `-race` (`make test` does this on Windows). |
 | `409` "Request in progress" on a retry | The first request with that `Idempotency-Key` has not finished. Wait for `Retry-After` and retry. |
 | `422` "Idempotency key reused" | The key was already used with a different body. Use a new key per distinct request. |
+| Event stream connects but events arrive in bursts or never | A proxy is buffering the response. Disable buffering for `text/event-stream` (the API already sends `X-Accel-Buffering: no` for nginx). |
+| `/readyz` reports `events_listener: unavailable` | The dedicated `LISTEN` connection is down; it reconnects with backoff. Check database connectivity and `max_connections`. |
 | `401` with `error="invalid_token"` | The token expired, or it was minted with a different secret, issuer or audience than the API uses. Mint a new one with the same `.env`. |
 | `403` with `error="insufficient_scope"` | The token lacks the scope named in the header. Mint one with `SCOPE=...`. |
 | `go` or `make` not found after installing | Open a new terminal so `PATH` is reloaded. |

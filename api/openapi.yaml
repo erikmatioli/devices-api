@@ -307,12 +307,28 @@ paths:
       operationId: streamDeviceEvents
       summary: Subscribe to device state changes
       description: |
-        Server-Sent Events stream. Each message has `event: device.state_changed`
-        and a JSON `data` field shaped as `DeviceStateChangedEvent`. A comment line is sent every 15 seconds to keep
-        the connection open. Delivery is at-most-once: events emitted while a
-        client is disconnected are not replayed.
+        Server-Sent Events stream of committed state changes, from every
+        replica. Each message has an `id` (the event id), `event:
+        device.state_changed` and a JSON `data` field shaped as
+        `DeviceStateChangedEvent`.
+
+        - The stream starts with `retry: 3000`, the reconnection delay hint.
+        - A `: keep-alive` comment is sent every 15 seconds.
+        - Delivery is at-most-once: events emitted while a client is
+          disconnected are not replayed, and a client too slow to read its
+          stream is disconnected and should reconnect.
+        - Updates that change only the name or brand, and no-op updates,
+          produce no event.
       security:
         - bearerAuth: [devices:read]
+      parameters:
+        - name: device_id
+          in: query
+          required: false
+          description: Only stream events of this device.
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Event stream.
@@ -328,6 +344,19 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          description: The replica reached its subscriber limit.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                example: 5
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
   /openapi.yaml:
     get:
