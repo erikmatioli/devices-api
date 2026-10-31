@@ -15,6 +15,7 @@ import (
 	"github.com/erikmatioli/devices-api/internal/app/apptest"
 	"github.com/erikmatioli/devices-api/internal/auth"
 	"github.com/erikmatioli/devices-api/internal/httpapi"
+	"github.com/erikmatioli/devices-api/internal/idempotency"
 )
 
 var testSecret = []byte("0123456789abcdef0123456789abcdef")
@@ -30,6 +31,7 @@ const (
 type apiFixture struct {
 	t       *testing.T
 	repo    *apptest.MemoryRepository
+	idem    *idempotency.MemoryStore
 	handler http.Handler
 }
 
@@ -46,13 +48,16 @@ func newAPI(t *testing.T) *apiFixture {
 	verifier := auth.NewHS256Verifier(auth.Config{
 		Issuer: testIssuer, Audience: testAudience, HS256Secret: testSecret, ClockSkew: time.Second,
 	})
+	idem := idempotency.NewMemoryStore(time.Hour, time.Minute, nil)
 	return &apiFixture{
 		t:    t,
 		repo: repo,
+		idem: idem,
 		handler: httpapi.NewRouter(httpapi.Dependencies{
-			Logger:   discardLogger(),
-			Devices:  svc,
-			Verifier: verifier,
+			Logger:      discardLogger(),
+			Devices:     svc,
+			Verifier:    verifier,
+			Idempotency: idem,
 		}),
 	}
 }

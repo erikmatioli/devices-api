@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/erikmatioli/devices-api/internal/auth"
+	"github.com/erikmatioli/devices-api/internal/idempotency"
 )
 
 const readinessTimeout = 2 * time.Second
@@ -16,6 +17,9 @@ type Dependencies struct {
 	Logger   *slog.Logger
 	Devices  DeviceService
 	Verifier TokenVerifier
+	// Idempotency records responses of requests sent with an
+	// Idempotency-Key. When nil, the header is ignored.
+	Idempotency idempotency.Store
 	// Readiness lists the dependency checks run by GET /readyz, by name.
 	Readiness map[string]CheckFunc
 }
@@ -36,7 +40,11 @@ func NewRouter(deps Dependencies) http.Handler {
 	protect := func(scope string, h http.HandlerFunc) http.Handler {
 		return authn(requireScope(scope, h))
 	}
-	mux.Handle("POST /v1/devices", protect(auth.ScopeWrite, devices.create))
+	create := http.Handler(http.HandlerFunc(devices.create))
+	if deps.Idempotency != nil {
+		create = idempotent(deps.Idempotency, deps.Logger)(create)
+	}
+	mux.Handle("POST /v1/devices", authn(requireScope(auth.ScopeWrite, create)))
 	mux.Handle("GET /v1/devices", protect(auth.ScopeRead, devices.list))
 	mux.Handle("GET /v1/devices/{id}", protect(auth.ScopeRead, devices.get))
 	mux.Handle("PUT /v1/devices/{id}", protect(auth.ScopeWrite, devices.replace))
