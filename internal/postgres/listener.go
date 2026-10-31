@@ -51,6 +51,8 @@ type Listener struct {
 func NewListener(pool *pgxpool.Pool, publisher Publisher, logger *slog.Logger) *Listener {
 	cfg := pool.Config().ConnConfig.Copy()
 	cfg.RuntimeParams["application_name"] = listenerApplicationName
+	// The periodic pings would only add noise to traces.
+	cfg.Tracer = nil
 	return &Listener{
 		connConfig:   cfg,
 		publisher:    publisher,
