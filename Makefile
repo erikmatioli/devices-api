@@ -80,6 +80,10 @@ load: ## Run the k6 smoke load test against the running stack (VUS, DURATION)
 	  -e TOKEN="$$(go run ./cmd/tokengen -ttl 10m)" -e VUS=$(or $(VUS),20) -e DURATION=$(or $(DURATION),30s) \
 	  grafana/k6:0.55.0 run - < test/load/smoke.js
 
+.PHONY: postman
+postman: ## Run the Postman collection with Newman against the running stack
+	npx --yes newman@6.2.1 run postman/devices-api.postman_collection.json -e postman/local.postman_environment.json
+
 .PHONY: up
 up: ## Build the images (API and tokengen) and start the API and PostgreSQL
 	docker compose --profile tools build

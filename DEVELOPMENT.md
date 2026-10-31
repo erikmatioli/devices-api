@@ -224,6 +224,7 @@ collector; they are only exported when an OTLP endpoint is configured.
 | `make cover` | All tests with coverage summary (`coverage.out`) |
 | `make test-docker` | All tests with the race detector in a Linux container (needs `make up`) |
 | `make load` | k6 smoke load test against the running stack (`VUS`, `DURATION`) |
+| `make postman` | Run the Postman collection with Newman against the running stack |
 | `make lint` | golangci-lint |
 | `make fmt` | Format code (gofmt and goimports) |
 | `make tidy` | `go mod tidy` and `go mod verify` |
@@ -269,6 +270,7 @@ internal/postgres/    pool, repositories, LISTEN loop and embedded SQL migration
 api/openapi.yaml      API contract, embedded and served at /openapi.yaml and /docs
 deploy/               collector and Prometheus configuration for `make observability`
 test/load/            k6 smoke load test (`make load`)
+postman/              Postman collection and environment (`make postman`)
 docs/                 architecture, flows and delivery plan
 ```
 
@@ -295,7 +297,8 @@ import each other; `cmd/api` wires them together.
 4. Map new domain errors to a status in `writeError` (`respond.go`).
 5. Add handler tests in `internal/httpapi` (they run against the in-memory
    repository) and repository tests when SQL changes.
-6. Lint the contract: `npx @redocly/cli lint api/openapi.yaml`.
+6. Add the request to the Postman collection in the matching folder.
+7. Lint the contract: `npx @redocly/cli lint api/openapi.yaml`.
 
 ### Changing the database schema
 

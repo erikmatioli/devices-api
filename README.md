@@ -103,7 +103,10 @@ curl -N -H "$AUTH" http://localhost:8080/v1/devices/events
 
 Common to all `/v1` routes: `401` without a valid token, `403` without the
 scope, `400` for malformed JSON, `413` above 1 MB, `415` for other content
-types. The full contract, with schemas and examples, is in
+types. A Postman collection that walks through every endpoint, with assertions
+and automatic tokens, is in [`postman/`](postman/README.md).
+
+The full contract, with schemas and examples, is in
 [`api/openapi.yaml`](api/openapi.yaml) and at <http://localhost:8080/docs>
 (use **Authorize** with the token).
 
@@ -157,6 +160,7 @@ The decisions and their trade-offs are recorded in
 | `make test-docker` | Everything with the race detector in a Linux container (useful on Windows) |
 | `make lint` | golangci-lint with security, error-handling and context checks |
 | `make load` | k6 smoke load test against the running stack |
+| `make postman` | The Postman collection (41 requests, 145 assertions) with Newman |
 
 Coverage is about 80% of statements overall, 100% for the domain, service,
 idempotency and logger packages and 95% for the HTTP layer. The suites cover,
@@ -226,6 +230,7 @@ internal/platform/    configuration, logger, telemetry
 api/                  OpenAPI contract (embedded in the binary)
 deploy/               collector and Prometheus configuration
 test/load/            k6 smoke test
+postman/              Postman collection and local environment
 docs/                 architecture, flows, delivery plan
 ```
 
