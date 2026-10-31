@@ -33,7 +33,7 @@ const (
 //
 // Server errors (5xx) are not recorded, so the client can retry them. The
 // key is scoped to the token subject, so it must run after authenticate.
-func idempotent(store idempotency.Store, logger *slog.Logger) middleware {
+func idempotent(store idempotency.Store, logger *slog.Logger, metrics Metrics) middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			values := r.Header.Values(HeaderIdempotencyKey)
@@ -71,6 +71,7 @@ func idempotent(store idempotency.Store, logger *slog.Logger) middleware {
 				return
 			}
 
+			metrics.IdempotencyOutcome(r.Context(), outcomeName(res.Outcome))
 			switch res.Outcome {
 			case idempotency.Replay:
 				replay(w, res.Response)
@@ -117,6 +118,21 @@ func idempotent(store idempotency.Store, logger *slog.Logger) middleware {
 			}
 			buf.flushTo(w)
 		})
+	}
+}
+
+func outcomeName(o idempotency.Outcome) string {
+	switch o {
+	case idempotency.Started:
+		return "started"
+	case idempotency.Replay:
+		return "replayed"
+	case idempotency.Mismatch:
+		return "mismatch"
+	case idempotency.InProgress:
+		return "in_progress"
+	default:
+		return "unknown"
 	}
 }
 

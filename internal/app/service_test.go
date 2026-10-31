@@ -154,3 +154,47 @@ func TestDelete(t *testing.T) {
 		t.Errorf("Get after delete = %v, want ErrNotFound", err)
 	}
 }
+
+type countingMetrics struct {
+	created, deleted int
+	transitions      []string
+}
+
+func (m *countingMetrics) DeviceCreated(context.Context) { m.created++ }
+func (m *countingMetrics) DeviceDeleted(context.Context) { m.deleted++ }
+func (m *countingMetrics) DeviceStateChanged(_ context.Context, from, to device.State) {
+	m.transitions = append(m.transitions, string(from)+"->"+string(to))
+}
+
+func TestServiceRecordsMetricsAfterSuccess(t *testing.T) {
+	ctx := context.Background()
+	repo := apptest.NewMemoryRepository()
+	m := &countingMetrics{}
+	svc := app.NewService(repo, app.WithIDGenerator(func() uuid.UUID { return fixedID }), app.WithMetrics(m))
+
+	if _, err := svc.Create(ctx, app.CreateInput{Name: "", Brand: "b"}); err == nil {
+		t.Fatal("expected a validation error")
+	}
+	if _, err := svc.Create(ctx, app.CreateInput{Name: "a", Brand: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(ctx, fixedID, device.Changes{Name: ptr("renamed")}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(ctx, fixedID, device.Changes{State: ptr(device.StateInUse)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Delete(ctx, fixedID); err == nil {
+		t.Fatal("deleting an in-use device should fail")
+	}
+	if _, err := svc.Update(ctx, fixedID, device.Changes{State: ptr(device.StateInactive)}, ptr(int64(99))); err == nil {
+		t.Fatal("stale version should fail")
+	}
+
+	if m.created != 1 || m.deleted != 0 {
+		t.Errorf("created %d, deleted %d; failures must not be counted", m.created, m.deleted)
+	}
+	if len(m.transitions) != 1 || m.transitions[0] != "available->in-use" {
+		t.Errorf("transitions = %v", m.transitions)
+	}
+}

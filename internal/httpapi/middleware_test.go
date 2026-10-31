@@ -133,7 +133,7 @@ func TestAccessLog(t *testing.T) {
 	mux.HandleFunc("GET /fail", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	})
-	h := chain(mux, requestID, accessLog(newJSONLogger(&buf), map[string]bool{"/healthz": true}))
+	h := chain(mux, requestID, observe(newJSONLogger(&buf), noopMetrics{}, map[string]bool{"/healthz": true}))
 
 	for _, path := range []string{"/v1/devices/42", "/healthz", "/fail"} {
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))

@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"runtime/debug"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // HeaderRequestID carries the request correlation id in both directions.
@@ -107,9 +110,22 @@ func (rec *statusRecorder) Unwrap() http.ResponseWriter {
 	return rec.ResponseWriter
 }
 
-// accessLog writes one record per request. Probe traffic is logged at debug
-// level to keep the log volume useful.
-func accessLog(logger *slog.Logger, quiet map[string]bool) middleware {
+// Metrics records HTTP-level measurements. Implementations must be safe for
+// concurrent use.
+type Metrics interface {
+	RequestCompleted(ctx context.Context, method, route string, status int, d time.Duration)
+	IdempotencyOutcome(ctx context.Context, outcome string)
+}
+
+type noopMetrics struct{}
+
+func (noopMetrics) RequestCompleted(context.Context, string, string, int, time.Duration) {}
+func (noopMetrics) IdempotencyOutcome(context.Context, string)                           {}
+
+// observe writes one access log record and one duration measurement per
+// request, and names the current span after the matched route. Probe and
+// scrape traffic is logged at debug level to keep the log volume useful.
+func observe(logger *slog.Logger, metrics Metrics, quiet map[string]bool) middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -124,6 +140,13 @@ func accessLog(logger *slog.Logger, quiet map[string]bool) middleware {
 			if rec.status == 0 {
 				rec.status = http.StatusOK
 			}
+			elapsed := time.Since(start)
+			metrics.RequestCompleted(r.Context(), r.Method, inner.Pattern, rec.status, elapsed)
+			if span := trace.SpanFromContext(r.Context()); span.IsRecording() && inner.Pattern != "" {
+				span.SetName(inner.Pattern)
+				span.SetAttributes(attribute.String("http.route", inner.Pattern))
+			}
+
 			level := slog.LevelInfo
 			switch {
 			case rec.status >= http.StatusInternalServerError:
@@ -138,7 +161,7 @@ func accessLog(logger *slog.Logger, quiet map[string]bool) middleware {
 				slog.String("route", inner.Pattern),
 				slog.Int("status", rec.status),
 				slog.Int("bytes", rec.bytes),
-				slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
+				slog.Float64("duration_ms", float64(elapsed.Microseconds())/1000),
 				slog.String("subject", meta.subject),
 				slog.String("remote_addr", r.RemoteAddr),
 				slog.String("user_agent", r.UserAgent()),

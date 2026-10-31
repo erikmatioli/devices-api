@@ -20,11 +20,26 @@ const (
 	MaxPageSize     = 100
 )
 
+// Metrics records business events. Implementations must be safe for
+// concurrent use.
+type Metrics interface {
+	DeviceCreated(ctx context.Context)
+	DeviceDeleted(ctx context.Context)
+	DeviceStateChanged(ctx context.Context, from, to device.State)
+}
+
+type noopMetrics struct{}
+
+func (noopMetrics) DeviceCreated(context.Context)                                  {}
+func (noopMetrics) DeviceDeleted(context.Context)                                  {}
+func (noopMetrics) DeviceStateChanged(context.Context, device.State, device.State) {}
+
 // Service implements the device use cases.
 type Service struct {
-	repo  DeviceRepository
-	now   func() time.Time
-	newID func() uuid.UUID
+	repo    DeviceRepository
+	now     func() time.Time
+	newID   func() uuid.UUID
+	metrics Metrics
 }
 
 // Option customizes a Service.
@@ -40,9 +55,14 @@ func WithIDGenerator(newID func() uuid.UUID) Option {
 	return func(s *Service) { s.newID = newID }
 }
 
+// WithMetrics records business metrics through m.
+func WithMetrics(m Metrics) Option {
+	return func(s *Service) { s.metrics = m }
+}
+
 // NewService returns a Service that stores devices in repo.
 func NewService(repo DeviceRepository, opts ...Option) *Service {
-	s := &Service{repo: repo, now: time.Now, newID: device.NewID}
+	s := &Service{repo: repo, now: time.Now, newID: device.NewID, metrics: noopMetrics{}}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -72,6 +92,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (device.Device, er
 	if err := s.repo.Create(ctx, d); err != nil {
 		return device.Device{}, err
 	}
+	s.metrics.DeviceCreated(ctx)
 	return d, nil
 }
 
@@ -96,15 +117,30 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 // update only proceeds if the stored version still matches it, which gives
 // clients optimistic concurrency control through If-Match.
 func (s *Service) Update(ctx context.Context, id uuid.UUID, changes device.Changes, expectedVersion *int64) (device.Device, error) {
-	return s.repo.Update(ctx, id, func(d *device.Device) (device.Update, error) {
+	var upd device.Update
+	d, err := s.repo.Update(ctx, id, func(d *device.Device) (device.Update, error) {
 		if expectedVersion != nil && d.Version() != *expectedVersion {
 			return device.Update{}, ErrVersionMismatch
 		}
-		return d.Apply(changes, s.now())
+		var err error
+		upd, err = d.Apply(changes, s.now())
+		return upd, err
 	})
+	if err != nil {
+		return device.Device{}, err
+	}
+	// Recorded only once the change is committed.
+	if sc := upd.StateChange; sc != nil {
+		s.metrics.DeviceStateChanged(ctx, sc.From, sc.To)
+	}
+	return d, nil
 }
 
 // Delete removes a device that is not in use.
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.metrics.DeviceDeleted(ctx)
+	return nil
 }

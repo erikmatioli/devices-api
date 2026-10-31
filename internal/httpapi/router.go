@@ -25,6 +25,10 @@ type Dependencies struct {
 	// EventsKeepAlive is the interval of keep-alive comments on event
 	// streams; zero means 15 seconds.
 	EventsKeepAlive time.Duration
+	// Metrics records request metrics; nil disables them.
+	Metrics Metrics
+	// MetricsHandler serves GET /metrics when set.
+	MetricsHandler http.Handler
 	// Readiness lists the dependency checks run by GET /readyz, by name.
 	Readiness map[string]CheckFunc
 }
@@ -32,6 +36,10 @@ type Dependencies struct {
 // NewRouter builds the HTTP handler with every route and the shared
 // middleware chain.
 func NewRouter(deps Dependencies) http.Handler {
+	metrics := deps.Metrics
+	if metrics == nil {
+		metrics = noopMetrics{}
+	}
 	health := newHealthHandler(deps.Logger, deps.Readiness, readinessTimeout)
 	devices := &deviceHandler{svc: deps.Devices, logger: deps.Logger}
 
@@ -40,6 +48,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /readyz", health.ready)
 	mux.HandleFunc("GET /openapi.yaml", serveOpenAPI)
 	mux.HandleFunc("GET /docs", serveDocs)
+	if deps.MetricsHandler != nil {
+		mux.Handle("GET /metrics", deps.MetricsHandler)
+	}
 
 	authn := authenticate(deps.Verifier, deps.Logger)
 	protect := func(scope string, h http.HandlerFunc) http.Handler {
@@ -47,7 +58,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	create := http.Handler(http.HandlerFunc(devices.create))
 	if deps.Idempotency != nil {
-		create = idempotent(deps.Idempotency, deps.Logger)(create)
+		create = idempotent(deps.Idempotency, deps.Logger, metrics)(create)
 	}
 	mux.Handle("POST /v1/devices", authn(requireScope(auth.ScopeWrite, create)))
 	mux.Handle("GET /v1/devices", protect(auth.ScopeRead, devices.list))
@@ -65,10 +76,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		mux.Handle("GET /v1/devices/events", protect(auth.ScopeRead, stream.stream))
 	}
 
-	probes := map[string]bool{"/healthz": true, "/readyz": true}
+	quiet := map[string]bool{"/healthz": true, "/readyz": true, "/metrics": true}
 	return chain(problemFallback(mux),
 		requestID,
-		accessLog(deps.Logger, probes),
+		observe(deps.Logger, metrics, quiet),
 		recoverer(deps.Logger),
 		secureHeaders,
 	)
