@@ -5,14 +5,17 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/erikmatioli/devices-api/internal/auth"
 )
 
 const readinessTimeout = 2 * time.Second
 
 // Dependencies groups what the router needs from the composition root.
 type Dependencies struct {
-	Logger  *slog.Logger
-	Devices DeviceService
+	Logger   *slog.Logger
+	Devices  DeviceService
+	Verifier TokenVerifier
 	// Readiness lists the dependency checks run by GET /readyz, by name.
 	Readiness map[string]CheckFunc
 }
@@ -29,12 +32,16 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /openapi.yaml", serveOpenAPI)
 	mux.HandleFunc("GET /docs", serveDocs)
 
-	mux.HandleFunc("POST /v1/devices", devices.create)
-	mux.HandleFunc("GET /v1/devices", devices.list)
-	mux.HandleFunc("GET /v1/devices/{id}", devices.get)
-	mux.HandleFunc("PUT /v1/devices/{id}", devices.replace)
-	mux.HandleFunc("PATCH /v1/devices/{id}", devices.patch)
-	mux.HandleFunc("DELETE /v1/devices/{id}", devices.delete)
+	authn := authenticate(deps.Verifier, deps.Logger)
+	protect := func(scope string, h http.HandlerFunc) http.Handler {
+		return authn(requireScope(scope, h))
+	}
+	mux.Handle("POST /v1/devices", protect(auth.ScopeWrite, devices.create))
+	mux.Handle("GET /v1/devices", protect(auth.ScopeRead, devices.list))
+	mux.Handle("GET /v1/devices/{id}", protect(auth.ScopeRead, devices.get))
+	mux.Handle("PUT /v1/devices/{id}", protect(auth.ScopeWrite, devices.replace))
+	mux.Handle("PATCH /v1/devices/{id}", protect(auth.ScopeWrite, devices.patch))
+	mux.Handle("DELETE /v1/devices/{id}", protect(auth.ScopeDelete, devices.delete))
 
 	probes := map[string]bool{"/healthz": true, "/readyz": true}
 	return chain(problemFallback(mux),

@@ -13,11 +13,20 @@ import (
 
 	"github.com/erikmatioli/devices-api/internal/app"
 	"github.com/erikmatioli/devices-api/internal/app/apptest"
+	"github.com/erikmatioli/devices-api/internal/auth"
 	"github.com/erikmatioli/devices-api/internal/httpapi"
 )
 
-// apiFixture runs requests through the full router with the real service
-// and an in-memory repository.
+var testSecret = []byte("0123456789abcdef0123456789abcdef")
+
+const (
+	testIssuer   = "https://issuer.test"
+	testAudience = "devices-api"
+)
+
+// apiFixture runs requests through the full router with the real service,
+// an in-memory repository and the real token verifier. Requests carry a
+// token with every scope unless they set Authorization themselves.
 type apiFixture struct {
 	t       *testing.T
 	repo    *apptest.MemoryRepository
@@ -34,14 +43,28 @@ func newAPI(t *testing.T) *apiFixture {
 		return now
 	}
 	svc := app.NewService(repo, app.WithClock(clock))
+	verifier := auth.NewHS256Verifier(auth.Config{
+		Issuer: testIssuer, Audience: testAudience, HS256Secret: testSecret, ClockSkew: time.Second,
+	})
 	return &apiFixture{
 		t:    t,
 		repo: repo,
 		handler: httpapi.NewRouter(httpapi.Dependencies{
-			Logger:  discardLogger(),
-			Devices: svc,
+			Logger:   discardLogger(),
+			Devices:  svc,
+			Verifier: verifier,
 		}),
 	}
+}
+
+// token mints a valid access token with the given scopes.
+func (f *apiFixture) token(scopes ...string) string {
+	f.t.Helper()
+	tok, err := auth.SignHS256(testSecret, testIssuer, testAudience, "test-user", scopes, time.Hour, time.Now())
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return tok
 }
 
 type response struct {
@@ -108,6 +131,7 @@ func (f *apiFixture) do(method, path, body string, headers ...string) response {
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("Authorization", "Bearer "+f.token(auth.ScopeRead, auth.ScopeWrite, auth.ScopeDelete))
 	for i := 0; i+1 < len(headers); i += 2 {
 		req.Header.Set(headers[i], headers[i+1])
 	}
@@ -220,8 +244,10 @@ func TestCreateDeviceMalformedBody(t *testing.T) {
 			default:
 				req.Header.Set("Content-Type", tt.contentType)
 			}
+			api := newAPI(t)
+			req.Header.Set("Authorization", "Bearer "+api.token(auth.ScopeWrite))
 			rec := httptest.NewRecorder()
-			newAPI(t).handler.ServeHTTP(rec, req)
+			api.handler.ServeHTTP(rec, req)
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.wantStatus, rec.Body.String())
@@ -490,6 +516,7 @@ func TestPatchDevice(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/v1/devices/"+d.ID, strings.NewReader(`{"state":"in-use"}`))
 	req.Header.Set("Content-Type", "application/merge-patch+json")
+	req.Header.Set("Authorization", "Bearer "+api.token(auth.ScopeWrite))
 	rec := httptest.NewRecorder()
 	api.handler.ServeHTTP(rec, req)
 

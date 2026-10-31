@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/erikmatioli/devices-api/internal/app"
+	"github.com/erikmatioli/devices-api/internal/auth"
 	"github.com/erikmatioli/devices-api/internal/httpapi"
 	"github.com/erikmatioli/devices-api/internal/platform/config"
 	"github.com/erikmatioli/devices-api/internal/platform/logger"
@@ -66,11 +67,27 @@ func run() error {
 		}
 	}
 
+	verifier, err := auth.New(ctx, auth.Config{
+		Issuer:      cfg.Auth.Issuer,
+		Audience:    cfg.Auth.Audience,
+		HS256Secret: []byte(cfg.Auth.HS256Secret),
+		JWKSURL:     cfg.Auth.JWKSURL,
+		JWKSRefresh: cfg.Auth.JWKSRefresh,
+		ClockSkew:   cfg.Auth.ClockSkew,
+	}, log)
+	if err != nil {
+		return err
+	}
+	if cfg.Auth.HS256Secret != "" {
+		log.Warn("access tokens are verified with a shared HS256 secret; use AUTH_JWKS_URL in production")
+	}
+
 	devices := app.NewService(postgres.NewDeviceRepository(pool))
 
 	handler := httpapi.NewRouter(httpapi.Dependencies{
-		Logger:  log,
-		Devices: devices,
+		Logger:   log,
+		Devices:  devices,
+		Verifier: verifier,
 		Readiness: map[string]httpapi.CheckFunc{
 			"database": pool.Ping,
 		},

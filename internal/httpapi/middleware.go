@@ -65,6 +65,19 @@ func newRequestID() string {
 	return hex.EncodeToString(b[:])
 }
 
+// requestMeta collects facts learned deeper in the handler chain, such as the
+// authenticated subject, so the access log can report them.
+type requestMeta struct {
+	subject string
+}
+
+type requestMetaKey struct{}
+
+func requestMetaFrom(ctx context.Context) *requestMeta {
+	m, _ := ctx.Value(requestMetaKey{}).(*requestMeta)
+	return m
+}
+
 // statusRecorder captures the status code and body size of a response.
 type statusRecorder struct {
 	http.ResponseWriter
@@ -101,8 +114,12 @@ func accessLog(logger *slog.Logger, quiet map[string]bool) middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			rec := &statusRecorder{ResponseWriter: w}
+			meta := &requestMeta{}
 
-			next.ServeHTTP(rec, r)
+			// The mux records the matched pattern on the request it receives,
+			// so keep a reference to that request for the log record.
+			inner := r.WithContext(context.WithValue(r.Context(), requestMetaKey{}, meta))
+			next.ServeHTTP(rec, inner)
 
 			if rec.status == 0 {
 				rec.status = http.StatusOK
@@ -118,10 +135,11 @@ func accessLog(logger *slog.Logger, quiet map[string]bool) middleware {
 				slog.String("request_id", RequestIDFrom(r.Context())),
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
-				slog.String("route", r.Pattern),
+				slog.String("route", inner.Pattern),
 				slog.Int("status", rec.status),
 				slog.Int("bytes", rec.bytes),
 				slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
+				slog.String("subject", meta.subject),
 				slog.String("remote_addr", r.RemoteAddr),
 				slog.String("user_agent", r.UserAgent()),
 			)
