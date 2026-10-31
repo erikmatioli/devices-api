@@ -59,22 +59,22 @@ cmd/
 internal/
   device/               # domain: entity, state machine, rules, domain errors
   app/                  # use cases and ports (Repository, IdempotencyStore)
-  http/                 # handlers, DTOs, validation, problem+json, middleware
+  httpapi/              # handlers, DTOs, validation, problem+json, middleware
   postgres/             # pgx repository, transactions, migrations (embedded)
   events/               # LISTEN loop, in-process hub, SSE writer
   auth/                 # JWT verification and scope checks
-  platform/             # config, logger, telemetry bootstrap, health checks
+  platform/             # config, logger, telemetry bootstrap
 api/
   openapi.yaml          # API contract (source of truth for the HTTP layer)
-deploy/
-  docker-compose.yaml   # postgres, api and optional observability stack
+compose.yaml            # postgres, api and optional observability stack
+Dockerfile              # multi-stage build into a distroless image
 ```
 
 | Layer | Knows about | Must not know about |
 |---|---|---|
 | `device` | Go standard library | HTTP, SQL, JSON tags for transport |
 | `app` | `device`, port interfaces | `net/http`, `pgx` |
-| `http` | `app`, `device` errors | SQL |
+| `httpapi` | `app`, `device` errors | SQL |
 | `postgres` | `app` ports, `device` | HTTP |
 
 ## 4. Domain model
