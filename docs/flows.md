@@ -83,8 +83,10 @@ sequenceDiagram
     end
 ```
 
-If the handler fails with a server error, the key row is removed, so a retry
-can run again.
+If the handler fails with a server error or panics, the key row is removed,
+so a retry can run again. Client errors (4xx) are recorded and replayed like
+successes. A row stuck in `processing` for longer than the lock timeout
+(the replica died mid-request) can be claimed by the next request.
 
 ## 4. Update (PUT or PATCH) with a state change
 

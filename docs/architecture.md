@@ -236,9 +236,22 @@ Clarifications:
 | Same key, different body | `422` |
 | Same key, first request still running | `409` |
 
-  Expired keys are purged by a periodic background job.
-- **Consequences:** Retries are safe across replicas and restarts. The cost is
-  one extra write per keyed request.
+  - The claim is a single `INSERT ... ON CONFLICT` upsert, so two concurrent
+    requests with the same key cannot both run.
+  - Server errors (5xx) and panics release the key, so the client can retry.
+    Client errors (4xx) are recorded and replayed.
+  - Only `Content-Type`, `Location`, `ETag` and `Cache-Control` are replayed;
+    per-response headers such as `X-Request-ID` are new on every answer.
+  - A record left in progress longer than `IDEMPOTENCY_LOCK_TIMEOUT` (a
+    replica crashed mid-request) can be claimed again.
+  - Expired records are ignored at once and deleted by a periodic job.
+- **Consequences:**
+  - Retries are safe across replicas and restarts. The cost is two extra
+    writes per keyed request.
+  - The device insert and the response record are separate statements. If a
+    replica dies between them, a retry after the lock timeout creates a
+    second device. Writing both in one transaction would close that gap; it
+    is listed under future improvements.
 
 ### ADR-09: Observability
 

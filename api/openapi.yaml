@@ -78,6 +78,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           description: A request with the same idempotency key is still being processed.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+                example: 1
           content:
             application/problem+json:
               schema:
@@ -416,8 +422,17 @@ components:
       in: header
       required: false
       description: |
-        Client-generated key that makes retries safe for 24 hours. Replaying
-        the same key with a different body returns `422`.
+        Client-generated key that makes retries safe for 24 hours. Keys are
+        scoped to the token subject.
+
+        - Same key and same request after it finished: the recorded response
+          is returned with `Idempotent-Replayed: true` (4xx responses are
+          recorded too).
+        - Same key with a different body: `422`.
+        - Same key while the first request is still running: `409` with
+          `Retry-After`.
+        - Server errors (5xx) are not recorded, so the request can be retried
+          with the same key.
       schema:
         type: string
         minLength: 1

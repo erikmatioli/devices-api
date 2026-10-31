@@ -111,6 +111,9 @@ An invalid value stops the process with a message that lists every problem.
 | `AUTH_JWKS_URL` | — | Identity provider key set; use instead of the secret in production |
 | `AUTH_JWKS_REFRESH` | `15m` | How often the key set is fetched again |
 | `AUTH_CLOCK_SKEW` | `30s` | Tolerance on `exp`, `nbf` and `iat` |
+| `IDEMPOTENCY_TTL` | `24h` | How long an `Idempotency-Key` response can be replayed |
+| `IDEMPOTENCY_LOCK_TIMEOUT` | `1m` | After this, a request still in progress is treated as abandoned; must exceed `HTTP_WRITE_TIMEOUT` |
+| `IDEMPOTENCY_PURGE_INTERVAL` | `15m` | How often expired records are deleted |
 | `HTTP_ADDR` | `:8080` | Listen address |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Time allowed to read request headers |
 | `HTTP_READ_TIMEOUT` | `10s` | Time allowed to read the whole request |
@@ -290,6 +293,8 @@ The binary reports its version in every log record (`version` field).
 | Integration tests fail with `Cannot connect to the Docker daemon` | Start Docker, or set `TEST_DATABASE_URL` to an existing PostgreSQL. |
 | `Dirty database version N` at startup | A migration failed halfway. Fix the cause, then run `migrate ... force N-1` and restart. |
 | `-race requires cgo` | Install a C compiler, or run without `-race` (`make test` does this on Windows). |
+| `409` "Request in progress" on a retry | The first request with that `Idempotency-Key` has not finished. Wait for `Retry-After` and retry. |
+| `422` "Idempotency key reused" | The key was already used with a different body. Use a new key per distinct request. |
 | `401` with `error="invalid_token"` | The token expired, or it was minted with a different secret, issuer or audience than the API uses. Mint a new one with the same `.env`. |
 | `403` with `error="insufficient_scope"` | The token lacks the scope named in the header. Mint one with `SCOPE=...`. |
 | `go` or `make` not found after installing | Open a new terminal so `PATH` is reloaded. |

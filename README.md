@@ -3,8 +3,8 @@
 REST API written in Go to persist and manage device resources, with real-time
 notifications of device state changes.
 
-> **Status:** in progress. The device endpoints and JWT authorization are
-> available; idempotency, notifications and telemetry follow the
+> **Status:** in progress. The device endpoints, JWT authorization and
+> idempotency keys are available; notifications and telemetry follow the
 > [delivery plan](docs/delivery-plan.md).
 
 ## Features
