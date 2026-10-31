@@ -35,8 +35,10 @@ linters:
         - name: unused-parameter
   exclusions:
     rules:
+      # Test helpers close response bodies through t.Cleanup, which
+      # bodyclose cannot follow.
       - path: _test\.go
-        linters: [gosec, noctx]
+        linters: [gosec, noctx, bodyclose]
 
 formatters:
   enable:

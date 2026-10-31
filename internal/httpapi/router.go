@@ -20,6 +20,11 @@ type Dependencies struct {
 	// Idempotency records responses of requests sent with an
 	// Idempotency-Key. When nil, the header is ignored.
 	Idempotency idempotency.Store
+	// Events feeds GET /v1/devices/events.
+	Events EventHub
+	// EventsKeepAlive is the interval of keep-alive comments on event
+	// streams; zero means 15 seconds.
+	EventsKeepAlive time.Duration
 	// Readiness lists the dependency checks run by GET /readyz, by name.
 	Readiness map[string]CheckFunc
 }
@@ -50,6 +55,15 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.Handle("PUT /v1/devices/{id}", protect(auth.ScopeWrite, devices.replace))
 	mux.Handle("PATCH /v1/devices/{id}", protect(auth.ScopeWrite, devices.patch))
 	mux.Handle("DELETE /v1/devices/{id}", protect(auth.ScopeDelete, devices.delete))
+
+	if deps.Events != nil {
+		keepAlive := deps.EventsKeepAlive
+		if keepAlive <= 0 {
+			keepAlive = defaultKeepAlive
+		}
+		stream := &eventsHandler{hub: deps.Events, logger: deps.Logger, keepAlive: keepAlive}
+		mux.Handle("GET /v1/devices/events", protect(auth.ScopeRead, stream.stream))
+	}
 
 	probes := map[string]bool{"/healthz": true, "/readyz": true}
 	return chain(problemFallback(mux),

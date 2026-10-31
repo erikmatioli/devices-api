@@ -14,6 +14,7 @@ import (
 	"github.com/erikmatioli/devices-api/internal/app"
 	"github.com/erikmatioli/devices-api/internal/app/apptest"
 	"github.com/erikmatioli/devices-api/internal/auth"
+	"github.com/erikmatioli/devices-api/internal/events"
 	"github.com/erikmatioli/devices-api/internal/httpapi"
 	"github.com/erikmatioli/devices-api/internal/idempotency"
 )
@@ -58,6 +59,7 @@ func newAPI(t *testing.T) *apiFixture {
 			Devices:     svc,
 			Verifier:    verifier,
 			Idempotency: idem,
+			Events:      events.NewHub(8, 0, nil),
 		}),
 	}
 }

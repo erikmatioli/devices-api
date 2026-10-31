@@ -67,6 +67,7 @@ func TestRouteScopes(t *testing.T) {
 		{http.MethodPut, "/v1/devices/" + id, auth.ScopeWrite},
 		{http.MethodPatch, "/v1/devices/" + id, auth.ScopeWrite},
 		{http.MethodDelete, "/v1/devices/" + id, auth.ScopeDelete},
+		{http.MethodGet, "/v1/devices/events?device_id=invalid", auth.ScopeRead},
 	}
 	all := []string{auth.ScopeRead, auth.ScopeWrite, auth.ScopeDelete}
 
