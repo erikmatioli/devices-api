@@ -9,9 +9,22 @@ import (
 	"github.com/erikmatioli/devices-api/internal/platform/config"
 )
 
+const testSecret = "0123456789abcdef0123456789abcdef"
+
+// lookupFrom resolves variables from env, falling back to a valid auth
+// setup so each test only states what it is about. Set a key to "" to
+// make it missing.
 func lookupFrom(env map[string]string) func(string) (string, bool) {
+	base := map[string]string{
+		"AUTH_ISSUER":       "https://issuer.test",
+		"AUTH_AUDIENCE":     "devices-api",
+		"AUTH_HS256_SECRET": testSecret,
+	}
 	return func(key string) (string, bool) {
-		v, ok := env[key]
+		if v, ok := env[key]; ok {
+			return v, true
+		}
+		v, ok := base[key]
 		return v, ok
 	}
 }
@@ -41,6 +54,26 @@ func TestFromLookupDefaults(t *testing.T) {
 	}
 	if !cfg.Database.AutoMigrate {
 		t.Error("AutoMigrate should default to true")
+	}
+	if cfg.Auth.ClockSkew != 30*time.Second || cfg.Auth.JWKSRefresh != 15*time.Minute {
+		t.Errorf("auth timings = %v/%v, want 30s/15m", cfg.Auth.ClockSkew, cfg.Auth.JWKSRefresh)
+	}
+	if cfg.Auth.HS256Secret != testSecret || cfg.Auth.Issuer != "https://issuer.test" {
+		t.Errorf("auth = %+v", cfg.Auth)
+	}
+}
+
+func TestFromLookupJWKS(t *testing.T) {
+	cfg, err := config.FromLookup(lookupFrom(map[string]string{
+		"DATABASE_URL":      "x",
+		"AUTH_HS256_SECRET": "",
+		"AUTH_JWKS_URL":     "https://idp.test/.well-known/jwks.json",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Auth.JWKSURL != "https://idp.test/.well-known/jwks.json" || cfg.Auth.HS256Secret != "" {
+		t.Errorf("auth = %+v", cfg.Auth)
 	}
 }
 
@@ -120,6 +153,31 @@ func TestFromLookupInvalid(t *testing.T) {
 			name:    "malformed boolean",
 			env:     map[string]string{"DATABASE_URL": "x", "DATABASE_AUTO_MIGRATE": "maybe"},
 			wantErr: "DATABASE_AUTO_MIGRATE must be true or false",
+		},
+		{
+			name:    "missing issuer",
+			env:     map[string]string{"DATABASE_URL": "x", "AUTH_ISSUER": ""},
+			wantErr: "AUTH_ISSUER is required",
+		},
+		{
+			name:    "no verification method",
+			env:     map[string]string{"DATABASE_URL": "x", "AUTH_HS256_SECRET": ""},
+			wantErr: "AUTH_HS256_SECRET or AUTH_JWKS_URL is required",
+		},
+		{
+			name:    "both verification methods",
+			env:     map[string]string{"DATABASE_URL": "x", "AUTH_JWKS_URL": "https://idp.test/jwks"},
+			wantErr: "mutually exclusive",
+		},
+		{
+			name:    "short secret",
+			env:     map[string]string{"DATABASE_URL": "x", "AUTH_HS256_SECRET": "short"},
+			wantErr: "AUTH_HS256_SECRET must be at least 32 bytes long",
+		},
+		{
+			name:    "relative jwks url",
+			env:     map[string]string{"DATABASE_URL": "x", "AUTH_HS256_SECRET": "", "AUTH_JWKS_URL": "/jwks.json"},
+			wantErr: "AUTH_JWKS_URL must be an absolute http or https URL",
 		},
 		{
 			name:    "unknown log level",

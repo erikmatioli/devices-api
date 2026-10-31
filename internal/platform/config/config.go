@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ const (
 type Config struct {
 	HTTP            HTTP
 	Database        Database
+	Auth            Auth
 	Log             Log
 	ShutdownTimeout time.Duration
 }
@@ -44,6 +46,20 @@ type Database struct {
 	// AutoMigrate applies pending schema migrations at startup.
 	AutoMigrate bool
 }
+
+// Auth configures access token verification. Exactly one of HS256Secret and
+// JWKSURL is set.
+type Auth struct {
+	Issuer      string
+	Audience    string
+	HS256Secret string
+	JWKSURL     string
+	JWKSRefresh time.Duration
+	ClockSkew   time.Duration
+}
+
+// minSecretLength is the minimum HS256 secret size (256 bits, RFC 7518).
+const minSecretLength = 32
 
 // Log configures the structured logger.
 type Log struct {
@@ -77,6 +93,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			ConnectTimeout: p.dur("DATABASE_CONNECT_TIMEOUT", 5*time.Second),
 			AutoMigrate:    p.boolean("DATABASE_AUTO_MIGRATE", true),
 		},
+		Auth: Auth{
+			Issuer:      p.required("AUTH_ISSUER"),
+			Audience:    p.required("AUTH_AUDIENCE"),
+			HS256Secret: p.str("AUTH_HS256_SECRET", ""),
+			JWKSURL:     p.str("AUTH_JWKS_URL", ""),
+			JWKSRefresh: p.dur("AUTH_JWKS_REFRESH", 15*time.Minute),
+			ClockSkew:   p.dur("AUTH_CLOCK_SKEW", 30*time.Second),
+		},
 		Log: Log{
 			Level:  p.level("LOG_LEVEL", slog.LevelInfo),
 			Format: p.oneOf("LOG_FORMAT", LogFormatJSON, LogFormatJSON, LogFormatText),
@@ -87,11 +111,28 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if cfg.Database.MinConns > cfg.Database.MaxConns {
 		p.fail("DATABASE_MIN_CONNS", "must not exceed DATABASE_MAX_CONNS")
 	}
+	validateAuth(&p, cfg.Auth)
 
 	if err := p.err(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func validateAuth(p *parser, a Auth) {
+	switch {
+	case a.HS256Secret == "" && a.JWKSURL == "":
+		p.fail("AUTH_HS256_SECRET", "or AUTH_JWKS_URL is required")
+	case a.HS256Secret != "" && a.JWKSURL != "":
+		p.fail("AUTH_HS256_SECRET", "and AUTH_JWKS_URL are mutually exclusive")
+	case a.HS256Secret != "" && len(a.HS256Secret) < minSecretLength:
+		p.fail("AUTH_HS256_SECRET", "must be at least 32 bytes long")
+	case a.JWKSURL != "":
+		u, err := url.Parse(a.JWKSURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			p.fail("AUTH_JWKS_URL", "must be an absolute http or https URL")
+		}
+	}
 }
 
 // parser reads typed values and accumulates validation errors.
