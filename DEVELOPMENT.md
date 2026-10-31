@@ -222,6 +222,8 @@ collector; they are only exported when an OTLP endpoint is configured.
 | `make test` | Unit tests (no Docker needed) |
 | `make test-integration` | Unit and integration tests against a PostgreSQL container |
 | `make cover` | All tests with coverage summary (`coverage.out`) |
+| `make test-docker` | All tests with the race detector in a Linux container (needs `make up`) |
+| `make load` | k6 smoke load test against the running stack (`VUS`, `DURATION`) |
 | `make lint` | golangci-lint |
 | `make fmt` | Format code (gofmt and goimports) |
 | `make tidy` | `go mod tidy` and `go mod verify` |
@@ -266,6 +268,7 @@ internal/httpapi/     routes, middleware, request decoding, problem responses, d
 internal/postgres/    pool, repositories, LISTEN loop and embedded SQL migrations
 api/openapi.yaml      API contract, embedded and served at /openapi.yaml and /docs
 deploy/               collector and Prometheus configuration for `make observability`
+test/load/            k6 smoke load test (`make load`)
 docs/                 architecture, flows and delivery plan
 ```
 

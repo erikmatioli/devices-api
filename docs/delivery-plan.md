@@ -20,6 +20,8 @@ explains what changed and why.
 
 ## Phases
 
+All phases are complete.
+
 | # | Phase | Scope | Exit criteria |
 |---|---|---|---|
 | 0 | Design | Architecture and ADRs, usage flows, delivery plan, OpenAPI draft, README skeleton | Design reviewed and approved |
@@ -50,4 +52,4 @@ explains what changed and why.
 | Containerized | 1 |
 | Git repository | 0 |
 | README with all instructions | 0, finalized in 9 |
-| Go 1.23+ | 1 |
+| Go 1.23+ | 1 (the module requires Go 1.26, the minimum of the OpenTelemetry SDK) |
