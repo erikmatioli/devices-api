@@ -159,10 +159,11 @@ checks plus an image build.
 cmd/api/              entry point: wiring, HTTP server, graceful shutdown
 internal/device/      domain model and business rules (no I/O)
 internal/app/         use cases and the ports they need (repository interface)
+internal/app/apptest/ in-memory repository used by service and handler tests
 internal/platform/    configuration and logger
-internal/httpapi/     routes, middleware, health probes, responses
+internal/httpapi/     routes, middleware, request decoding, problem responses, docs
 internal/postgres/    pool, repository and embedded SQL migrations
-api/openapi.yaml      API contract
+api/openapi.yaml      API contract, embedded and served at /openapi.yaml and /docs
 docs/                 architecture, flows and delivery plan
 ```
 
@@ -177,6 +178,19 @@ import each other; `cmd/api` wires them together.
 2. Read it in `FromLookup` with a default and validation.
 3. Cover it in `config_test.go`.
 4. Document it in the table above and in `.env.example`.
+
+### Adding or changing an endpoint
+
+1. Describe it in `api/openapi.yaml` first, including every error response.
+2. Put business rules in `internal/device` and orchestration in
+   `internal/app`; handlers only decode, validate the shape of the input and
+   map errors.
+3. Decode bodies with `readObject` and `fieldReader` so unknown fields, wrong
+   types and nulls produce the same `422` format as the other endpoints.
+4. Map new domain errors to a status in `writeError` (`respond.go`).
+5. Add handler tests in `internal/httpapi` (they run against the in-memory
+   repository) and repository tests when SQL changes.
+6. Lint the contract: `npx @redocly/cli lint api/openapi.yaml`.
 
 ### Changing the database schema
 

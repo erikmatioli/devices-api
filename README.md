@@ -3,8 +3,8 @@
 REST API written in Go to persist and manage device resources, with real-time
 notifications of device state changes.
 
-> **Status:** in progress. The service skeleton, the domain model and
-> PostgreSQL persistence are in place; the remaining work follows the
+> **Status:** in progress. The device endpoints are available; authentication,
+> idempotency, notifications and telemetry follow the
 > [delivery plan](docs/delivery-plan.md).
 
 ## Features
@@ -33,7 +33,7 @@ notifications of device state changes.
 | [`docs/architecture.md`](docs/architecture.md) | Components, layers, domain rules and decision records |
 | [`docs/flows.md`](docs/flows.md) | Sequence diagrams for every use case |
 | [`docs/delivery-plan.md`](docs/delivery-plan.md) | Phases, exit criteria and acceptance tracking |
-| [`api/openapi.yaml`](api/openapi.yaml) | OpenAPI 3.1 contract |
+| [`api/openapi.yaml`](api/openapi.yaml) | OpenAPI 3.1 contract, also served by the API at `/openapi.yaml` and rendered at `/docs` |
 
 ## API overview
 
@@ -48,6 +48,7 @@ notifications of device state changes.
 | `GET` | `/v1/devices/events` | `devices:read` | Stream state changes (SSE) |
 | `GET` | `/healthz`, `/readyz` | public | Liveness and readiness |
 | `GET` | `/metrics` | public | Prometheus metrics |
+| `GET` | `/openapi.yaml`, `/docs` | public | Contract and interactive documentation |
 
 ## Getting started
 

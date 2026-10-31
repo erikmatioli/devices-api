@@ -12,7 +12,12 @@ info:
     - Errors use `application/problem+json` (RFC 9457).
     - Every `/v1` endpoint requires a Bearer JWT carrying the listed scopes.
     - `POST /v1/devices` honours the `Idempotency-Key` header.
-    - Reads return an `ETag`; updates accept `If-Match` for optimistic locking.
+    - Reads return an `ETag`; updates accept `If-Match` for optimistic locking
+      and `GET /v1/devices/{id}` honours `If-None-Match`.
+    - Unknown request fields are rejected with `422`. Read-only fields (`id`,
+      `creation_time`) are rejected on create and accepted on updates only
+      when they carry the current value.
+    - Interactive documentation is served at `/docs`.
   license:
     name: MIT
     identifier: MIT
@@ -143,6 +148,14 @@ paths:
       summary: Fetch a single device
       security:
         - bearerAuth: [devices:read]
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: ETag from a previous read. Returns `304` when unchanged.
+          schema:
+            type: string
+            example: '"3"'
       responses:
         '200':
           description: The device.
@@ -153,6 +166,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Device'
+        '304':
+          description: The device has not changed since the given ETag.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -213,9 +231,9 @@ paths:
       operationId: patchDevice
       summary: Partially update a device
       description: |
-        JSON Merge Patch (RFC 7396). Only the fields present are changed.
-        `null` is not allowed because every field is required. The same domain
-        rules as `PUT` apply.
+        JSON Merge Patch (RFC 7396). Only the fields present are changed and an
+        empty object is a no-op. `null` is rejected because no field can be
+        removed. The same domain rules as `PUT` apply.
       security:
         - bearerAuth: [devices:write]
       parameters:
@@ -304,6 +322,34 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /openapi.yaml:
+    get:
+      tags: [Operations]
+      operationId: openapiDocument
+      summary: This OpenAPI document
+      security: []
+      responses:
+        '200':
+          description: The contract in YAML.
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /docs:
+    get:
+      tags: [Operations]
+      operationId: documentationPage
+      summary: Interactive documentation
+      security: []
+      responses:
+        '200':
+          description: Swagger UI page rendering this document.
+          content:
+            text/html:
+              schema:
+                type: string
 
   /healthz:
     get:
@@ -448,6 +494,10 @@ components:
       additionalProperties: false
       required: [name, brand, state]
       properties:
+        id:
+          type: string
+          format: uuid
+          description: Optional. Accepted only when equal to the path id.
         name:
           type: string
           minLength: 1
@@ -466,8 +516,11 @@ components:
     PatchDeviceRequest:
       type: object
       additionalProperties: false
-      minProperties: 1
       properties:
+        id:
+          type: string
+          format: uuid
+          description: Optional. Accepted only when equal to the path id.
         name:
           type: string
           minLength: 1
