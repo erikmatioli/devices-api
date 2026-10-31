@@ -1,0 +1,663 @@
+openapi: 3.1.0
+info:
+  title: Devices API
+  version: 0.1.0
+  summary: Persist and manage device resources.
+  description: |
+    REST API to create, update, query and delete devices, with a Server-Sent
+    Events stream that announces device state changes.
+
+    ## Conventions
+    - All payloads are JSON. Timestamps use RFC 3339 in UTC.
+    - Errors use `application/problem+json` (RFC 9457).
+    - Every `/v1` endpoint requires a Bearer JWT carrying the listed scopes.
+    - `POST /v1/devices` honours the `Idempotency-Key` header.
+    - Reads return an `ETag`; updates accept `If-Match` for optimistic locking.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: Devices
+    description: Device resource management.
+  - name: Events
+    description: Real-time device state notifications.
+  - name: Operations
+    description: Health and readiness probes.
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/devices:
+    post:
+      tags: [Devices]
+      operationId: createDevice
+      summary: Create a device
+      security:
+        - bearerAuth: [devices:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeviceRequest'
+            example:
+              name: Pixel 9
+              brand: Google
+      responses:
+        '201':
+          description: Device created.
+          headers:
+            Location:
+              description: URL of the new device.
+              schema:
+                type: string
+                example: /v1/devices/0192f7a1-1d3b-7e55-8c11-2a9f4b6c0d12
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotent-Replayed:
+              $ref: '#/components/headers/IdempotentReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: A request with the same idempotency key is still being processed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Devices]
+      operationId: listDevices
+      summary: List devices
+      description: |
+        Returns devices ordered by creation time, oldest first. Filters can be
+        combined. Use `next_cursor` from the response to fetch the next page.
+      security:
+        - bearerAuth: [devices:read]
+      parameters:
+        - name: brand
+          in: query
+          description: Exact brand match, case insensitive.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 50
+        - name: state
+          in: query
+          schema:
+            $ref: '#/components/schemas/DeviceState'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          description: Opaque cursor returned as `next_cursor` by the previous page.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of devices.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/devices/{id}:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      tags: [Devices]
+      operationId: getDevice
+      summary: Fetch a single device
+      security:
+        - bearerAuth: [devices:read]
+      responses:
+        '200':
+          description: The device.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Devices]
+      operationId: replaceDevice
+      summary: Fully update a device
+      description: |
+        Replaces every mutable field. `name` and `brand` cannot change while
+        the stored state is `in-use`; sending their current values is accepted.
+        `creation_time` may be sent only with its current value.
+      security:
+        - bearerAuth: [devices:write]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceDeviceRequest'
+            example:
+              name: Pixel 9 Pro
+              brand: Google
+              state: available
+      responses:
+        '200':
+          $ref: '#/components/responses/DeviceUpdated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Devices]
+      operationId: patchDevice
+      summary: Partially update a device
+      description: |
+        JSON Merge Patch (RFC 7396). Only the fields present are changed.
+        `null` is not allowed because every field is required. The same domain
+        rules as `PUT` apply.
+      security:
+        - bearerAuth: [devices:write]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/PatchDeviceRequest'
+            example:
+              state: in-use
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchDeviceRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/DeviceUpdated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Devices]
+      operationId: deleteDevice
+      summary: Delete a device
+      description: Devices in the `in-use` state cannot be deleted.
+      security:
+        - bearerAuth: [devices:delete]
+      responses:
+        '204':
+          description: Device deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/devices/events:
+    get:
+      tags: [Events]
+      operationId: streamDeviceEvents
+      summary: Subscribe to device state changes
+      description: |
+        Server-Sent Events stream. Each message has `event: device.state_changed`
+        and a JSON `data` field shaped as `DeviceStateChangedEvent`. A comment line is sent every 15 seconds to keep
+        the connection open. Delivery is at-most-once: events emitted while a
+        client is disconnected are not replayed.
+      security:
+        - bearerAuth: [devices:read]
+      responses:
+        '200':
+          description: Event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: |
+                id: 0192f7a4-6c2e-7c41-9a0b-3f5d8e2a1b77
+                event: device.state_changed
+                data: {"event_id":"0192f7a4-6c2e-7c41-9a0b-3f5d8e2a1b77","device_id":"0192f7a1-1d3b-7e55-8c11-2a9f4b6c0d12","previous_state":"available","new_state":"in-use","occurred_at":"2026-10-31T14:05:09.123Z"}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /healthz:
+    get:
+      tags: [Operations]
+      operationId: liveness
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: The process is running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+
+  /readyz:
+    get:
+      tags: [Operations]
+      operationId: readiness
+      summary: Readiness probe
+      description: Checks the database connection and the notification listener.
+      security: []
+      responses:
+        '200':
+          description: Ready to serve traffic.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: A dependency is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT validated for `iss`, `aud`, `exp` and `nbf`. Authorization uses the
+        space-separated `scope` claim: `devices:read`, `devices:write`,
+        `devices:delete`.
+
+  parameters:
+    DeviceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Client-generated key that makes retries safe for 24 hours. Replaying
+        the same key with a different body returns `422`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+        pattern: '^[\x21-\x7E]+$'
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: ETag from a previous read. A mismatch returns `412`.
+      schema:
+        type: string
+        example: '"3"'
+
+  headers:
+    ETag:
+      description: Current version of the device.
+      schema:
+        type: string
+        example: '"3"'
+    IdempotentReplayed:
+      description: Present and `true` when the response is a stored replay.
+      schema:
+        type: string
+        enum: ['true']
+
+  schemas:
+    DeviceState:
+      type: string
+      enum: [available, in-use, inactive]
+
+    Device:
+      type: object
+      required: [id, name, brand, state, creation_time]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        brand:
+          type: string
+          minLength: 1
+          maxLength: 50
+        state:
+          $ref: '#/components/schemas/DeviceState'
+        creation_time:
+          type: string
+          format: date-time
+          readOnly: true
+      example:
+        id: 0192f7a1-1d3b-7e55-8c11-2a9f4b6c0d12
+        name: Pixel 9
+        brand: Google
+        state: available
+        creation_time: '2026-10-31T14:00:00.000Z'
+
+    CreateDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [name, brand]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        brand:
+          type: string
+          minLength: 1
+          maxLength: 50
+        state:
+          $ref: '#/components/schemas/DeviceState'
+          default: available
+
+    ReplaceDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [name, brand, state]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        brand:
+          type: string
+          minLength: 1
+          maxLength: 50
+        state:
+          $ref: '#/components/schemas/DeviceState'
+        creation_time:
+          type: string
+          format: date-time
+          description: Optional. Accepted only when equal to the stored value.
+
+    PatchDeviceRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        brand:
+          type: string
+          minLength: 1
+          maxLength: 50
+        state:
+          $ref: '#/components/schemas/DeviceState'
+        creation_time:
+          type: string
+          format: date-time
+          description: Optional. Accepted only when equal to the stored value.
+
+    DeviceList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+        next_cursor:
+          type: [string, 'null']
+          description: Cursor for the next page, or `null` on the last page.
+
+    DeviceStateChangedEvent:
+      type: object
+      required: [event_id, device_id, previous_state, new_state, occurred_at]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        previous_state:
+          $ref: '#/components/schemas/DeviceState'
+        new_state:
+          $ref: '#/components/schemas/DeviceState'
+        occurred_at:
+          type: string
+          format: date-time
+
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          example: /problems/validation-error
+        title:
+          type: string
+          example: Validation failed
+        status:
+          type: integer
+          example: 422
+        detail:
+          type: string
+        instance:
+          type: string
+          description: Request path.
+        request_id:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        field:
+          type: string
+          example: name
+        code:
+          type: string
+          enum: [required, too_short, too_long, invalid_value, invalid_type, unknown_field, read_only]
+        message:
+          type: string
+          example: must be at most 100 characters
+
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, unavailable]
+
+  responses:
+    DeviceUpdated:
+      description: Device updated.
+      headers:
+        ETag:
+          $ref: '#/components/headers/ETag'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Device'
+    BadRequest:
+      description: Malformed JSON or unreadable body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing, expired or invalid token.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            example: Bearer error="invalid_token"
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: The token does not carry the required scope.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Device not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: The operation violates a domain rule for the current device state.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/device-in-use
+            title: Device in use
+            status: 409
+            detail: name and brand cannot be changed while the device is in use
+            instance: /v1/devices/0192f7a1-1d3b-7e55-8c11-2a9f4b6c0d12
+    PreconditionFailed:
+      description: The `If-Match` value does not match the current version.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PayloadTooLarge:
+      description: Request body larger than 1 MB.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnsupportedMediaType:
+      description: Unsupported `Content-Type`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableEntity:
+      description: |
+        Input validation failed, a read-only field was changed, or an
+        idempotency key was reused with a different body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/validation-error
+            title: Validation failed
+            status: 422
+            instance: /v1/devices
+            errors:
+              - field: name
+                code: required
+                message: must not be empty
+              - field: state
+                code: invalid_value
+                message: must be one of available, in-use, inactive
+    InternalError:
+      description: Unexpected server error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
