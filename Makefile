@@ -59,9 +59,19 @@ tidy: ## Tidy and verify module dependencies
 	go mod tidy
 	go mod verify
 
+# Token defaults for `make token`.
+SUB   ?= local-developer
+SCOPE ?= devices:read devices:write devices:delete
+TTL   ?= 1h
+
+.PHONY: token
+token: ## Print a development access token (SUB, SCOPE, TTL)
+	@go run ./cmd/tokengen -sub "$(SUB)" -scope "$(SCOPE)" -ttl $(TTL)
+
 .PHONY: up
-up: ## Build and start the API and PostgreSQL containers
-	docker compose up --build -d
+up: ## Build the images (API and tokengen) and start the API and PostgreSQL
+	docker compose --profile tools build
+	docker compose up -d
 
 .PHONY: down
 down: ## Stop the containers (keeps the database volume)

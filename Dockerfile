@@ -15,10 +15,19 @@ ARG VERSION=dev
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
-      -o /out/devices-api ./cmd/api
+      -o /out/devices-api ./cmd/api && \
+    go build -trimpath -ldflags="-s -w" -o /out/tokengen ./cmd/tokengen
 
-# Distroless static: no shell or package manager, runs as an unprivileged user.
-FROM gcr.io/distroless/static-debian12:nonroot
+# Development helper that mints local access tokens. Built only on request
+# (docker compose run --rm tokengen); it is not part of the API image.
+FROM gcr.io/distroless/static-debian12:nonroot AS tokengen
+COPY --from=build /out/tokengen /usr/local/bin/tokengen
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/tokengen"]
+
+# API image. Distroless static: no shell or package manager, runs as an
+# unprivileged user. Kept last so it is the default build target.
+FROM gcr.io/distroless/static-debian12:nonroot AS api
 COPY --from=build /out/devices-api /usr/local/bin/devices-api
 USER nonroot:nonroot
 EXPOSE 8080

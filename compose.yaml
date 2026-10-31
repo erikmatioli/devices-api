@@ -1,6 +1,11 @@
 # Local stack: the API and its PostgreSQL database.
-# Credentials below are for local development only.
+# Credentials and the token secret below are for local development only.
 name: devices-api
+
+x-auth-env: &auth-env
+  AUTH_ISSUER: ${AUTH_ISSUER:-devices-api-local}
+  AUTH_AUDIENCE: ${AUTH_AUDIENCE:-devices-api}
+  AUTH_HS256_SECRET: ${AUTH_HS256_SECRET:-local-development-secret-change-me}
 
 services:
   postgres:
@@ -22,9 +27,11 @@ services:
   api:
     build:
       context: .
+      target: api
       args:
         VERSION: ${VERSION:-dev}
     environment:
+      <<: *auth-env
       DATABASE_URL: postgres://devices:devices@postgres:5432/devices?sslmode=disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
@@ -33,6 +40,15 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+
+  # Prints a development token: docker compose run --rm tokengen
+  tokengen:
+    profiles: [tools]
+    build:
+      context: .
+      target: tokengen
+    environment:
+      <<: *auth-env
 
 volumes:
   pgdata:
