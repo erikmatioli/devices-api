@@ -122,6 +122,24 @@ type Changes struct {
 	CreationTime *time.Time
 }
 
+// Validate checks the values present in c without applying them, so callers
+// that also collect transport errors can report every problem at once. Rules
+// that depend on the stored device (read-only creation time, in-use lock)
+// are checked by Apply.
+func (c Changes) Validate() error {
+	var errs validationErrors
+	if c.Name != nil {
+		normalizeText(&errs, "name", *c.Name, MaxNameLength)
+	}
+	if c.Brand != nil {
+		normalizeText(&errs, "brand", *c.Brand, MaxBrandLength)
+	}
+	if c.State != nil && !c.State.Valid() {
+		errs.add("state", CodeInvalidValue, stateMessage)
+	}
+	return errs.err()
+}
+
 // StateChanged records a state transition.
 type StateChanged struct {
 	DeviceID   uuid.UUID

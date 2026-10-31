@@ -320,6 +320,19 @@ func TestApply(t *testing.T) {
 	}
 }
 
+func TestChangesValidate(t *testing.T) {
+	if err := (device.Changes{}).Validate(); err != nil {
+		t.Errorf("empty changes: %v", err)
+	}
+	if err := (device.Changes{Name: ptr("ok"), Brand: ptr("ok"), State: ptr(device.StateInactive)}).Validate(); err != nil {
+		t.Errorf("valid changes: %v", err)
+	}
+	err := device.Changes{Name: ptr(" "), Brand: ptr(strings.Repeat("b", 51)), State: ptr(device.State("x"))}.Validate()
+	if got := strings.Join(fieldCodes(t, err), ","); got != "name:required,brand:too_long,state:invalid_value" {
+		t.Errorf("field errors = %s", got)
+	}
+}
+
 func TestInUseErrorsShareSentinel(t *testing.T) {
 	for _, err := range []error{device.ErrNameBrandLocked, device.ErrDeleteInUse} {
 		if !errors.Is(err, device.ErrInUse) {
