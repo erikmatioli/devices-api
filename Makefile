@@ -37,9 +37,13 @@ run: ## Run the API locally using settings from .env
 test: ## Run unit tests
 	go test $(TEST_FLAGS) ./...
 
+.PHONY: test-integration
+test-integration: ## Run unit and integration tests (needs Docker)
+	go test $(TEST_FLAGS) -tags=integration -count=1 ./...
+
 .PHONY: cover
-cover: ## Run tests with coverage and print the summary
-	go test $(TEST_FLAGS) -covermode=atomic -coverprofile=$(COVER) ./...
+cover: ## Run all tests with coverage and print the summary (needs Docker)
+	go test $(TEST_FLAGS) -tags=integration -count=1 -covermode=atomic -coverprofile=$(COVER) ./...
 	go tool cover -func=$(COVER)
 
 .PHONY: lint

@@ -37,8 +37,9 @@ jobs:
           go-version: ${{ matrix.go }}
       - name: Verify modules
         run: go mod verify
-      - name: Test
-        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Test (unit and integration)
+        # Integration tests start PostgreSQL with testcontainers.
+        run: go test -race -tags=integration -covermode=atomic -coverprofile=coverage.out ./...
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -n 1
 
