@@ -8,14 +8,16 @@ this way, see [`docs/architecture.md`](docs/architecture.md).
 
 | Tool | Version | Used for |
 |---|---|---|
-| Go | 1.25 or newer | Building and testing |
+| Go | 1.25.11 or newer | Building and testing |
 | Docker with Compose v2 | 24 or newer | PostgreSQL, the container image, integration tests |
 | GNU Make | 4.x | Developer shortcuts (optional, every target is a plain command) |
 | golangci-lint | 2.x | Linting and formatting |
 | Git | any recent | Version control |
 
 Go 1.25 is the minimum because the PostgreSQL driver (`pgx` v5.12) requires
-it. The container image is built with the latest Go release.
+it, and the test dependencies pin the 1.25.11 patch release. With the default
+`GOTOOLCHAIN=auto`, an older 1.25.x downloads the right toolchain by itself.
+The container image is built with the latest Go release.
 
 ### Installing the tools
 
@@ -102,6 +104,7 @@ An invalid value stops the process with a message that lists every problem.
 | `DATABASE_MAX_CONNS` | `10` | Maximum pool size |
 | `DATABASE_MIN_CONNS` | `2` | Connections kept open when idle |
 | `DATABASE_CONNECT_TIMEOUT` | `5s` | Timeout to connect and to the startup ping |
+| `DATABASE_AUTO_MIGRATE` | `true` | Apply pending schema migrations at startup |
 | `HTTP_ADDR` | `:8080` | Listen address |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Time allowed to read request headers |
 | `HTTP_READ_TIMEOUT` | `10s` | Time allowed to read the whole request |
@@ -121,8 +124,9 @@ Compose also reads `API_PORT` and `POSTGRES_PORT` (both host ports) and
 | `make help` | List all targets |
 | `make build` | Compile `./bin/devices-api` |
 | `make run` | Run from source with `.env` |
-| `make test` | Unit tests |
-| `make cover` | Tests with coverage summary (`coverage.out`) |
+| `make test` | Unit tests (no Docker needed) |
+| `make test-integration` | Unit and integration tests against a PostgreSQL container |
+| `make cover` | All tests with coverage summary (`coverage.out`) |
 | `make lint` | golangci-lint |
 | `make fmt` | Format code (gofmt and goimports) |
 | `make tidy` | `go mod tidy` and `go mod verify` |
@@ -130,16 +134,34 @@ Compose also reads `API_PORT` and `POSTGRES_PORT` (both host ports) and
 | `make logs` | Follow API logs |
 | `make docker-build` | Build the image tagged with the git version |
 
-Before pushing, run `make fmt lint test`. CI runs the same checks plus an
-image build.
+Before pushing, run `make fmt lint test-integration`. CI runs the same
+checks plus an image build.
+
+### Tests
+
+- Unit tests have no build tag and need nothing but Go.
+- Integration tests carry the `integration` build tag. They start a
+  disposable `postgres:16-alpine` container through testcontainers, apply the
+  migrations once and truncate tables between tests. To reuse an existing
+  database instead (faster, or where Docker-in-Docker is not available), set
+  `TEST_DATABASE_URL`:
+
+  ```bash
+  TEST_DATABASE_URL=postgres://devices:devices@localhost:5432/devices?sslmode=disable make test-integration
+  ```
+
+  The tests truncate the tables, so never point this at a database whose data
+  matters.
 
 ## 5. Project layout
 
 ```
 cmd/api/              entry point: wiring, HTTP server, graceful shutdown
+internal/device/      domain model and business rules (no I/O)
+internal/app/         use cases and the ports they need (repository interface)
 internal/platform/    configuration and logger
 internal/httpapi/     routes, middleware, health probes, responses
-internal/postgres/    database pool and, later, repositories and migrations
+internal/postgres/    pool, repository and embedded SQL migrations
 api/openapi.yaml      API contract
 docs/                 architecture, flows and delivery plan
 ```
@@ -155,6 +177,29 @@ import each other; `cmd/api` wires them together.
 2. Read it in `FromLookup` with a default and validation.
 3. Cover it in `config_test.go`.
 4. Document it in the table above and in `.env.example`.
+
+### Changing the database schema
+
+Migrations live in `internal/postgres/migrations` and are embedded in the
+binary. With `DATABASE_AUTO_MIGRATE=true` (the default) they run at startup;
+an advisory lock keeps concurrent replicas from applying them twice.
+
+1. Add a pair of files with the next sequence number:
+   `000002_<description>.up.sql` and `000002_<description>.down.sql`.
+2. Never edit a migration that has already been released; add a new one.
+3. Prefer changes that old and new binaries can both run against (add
+   columns as nullable or with defaults, backfill, then tighten), so rolling
+   deployments keep working.
+4. Run `make test-integration`; the suite applies every migration from an
+   empty database.
+
+To manage migrations by hand (for example to roll back), use the
+[migrate CLI](https://github.com/golang-migrate/migrate/tree/master/cmd/migrate)
+with the same files:
+
+```bash
+migrate -path internal/postgres/migrations -database "$DATABASE_URL" down 1
+```
 
 ### Updating dependencies
 
@@ -182,5 +227,7 @@ The binary reports its version in every log record (`version` field).
 | `bind: address already in use` on 5432 or 8080 | Another service uses the port. Set `POSTGRES_PORT` or `API_PORT` in `.env` and update `DATABASE_URL`. |
 | `fatal: invalid configuration: DATABASE_URL is required` | `.env` is missing or not loaded. Run `cp .env.example .env`, or export the variable. |
 | `ping database: … connection refused` | PostgreSQL is not running or still starting. Run `docker compose up -d postgres` and wait for the health check. |
+| Integration tests fail with `Cannot connect to the Docker daemon` | Start Docker, or set `TEST_DATABASE_URL` to an existing PostgreSQL. |
+| `Dirty database version N` at startup | A migration failed halfway. Fix the cause, then run `migrate ... force N-1` and restart. |
 | `-race requires cgo` | Install a C compiler, or run without `-race` (`make test` does this on Windows). |
 | `go` or `make` not found after installing | Open a new terminal so `PATH` is reloaded. |

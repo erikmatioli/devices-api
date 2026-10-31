@@ -3,9 +3,9 @@
 REST API written in Go to persist and manage device resources, with real-time
 notifications of device state changes.
 
-> **Status:** in progress. The service skeleton (configuration, logging,
-> health probes, container image and CI) is in place; the remaining work
-> follows the [delivery plan](docs/delivery-plan.md).
+> **Status:** in progress. The service skeleton, the domain model and
+> PostgreSQL persistence are in place; the remaining work follows the
+> [delivery plan](docs/delivery-plan.md).
 
 ## Features
 
@@ -64,7 +64,8 @@ Without `make`, run `docker compose up --build -d`.
 
 | Task | Command |
 |---|---|
-| Run tests | `make test` |
+| Run unit tests | `make test` |
+| Run unit and integration tests (Docker) | `make test-integration` |
 | Coverage report | `make cover` |
 | Lint | `make lint` |
 | Stop the stack | `make down` |
