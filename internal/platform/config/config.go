@@ -25,6 +25,7 @@ type Config struct {
 	Database        Database
 	Auth            Auth
 	Idempotency     Idempotency
+	Events          Events
 	Log             Log
 	ShutdownTimeout time.Duration
 }
@@ -68,6 +69,15 @@ type Idempotency struct {
 	LockTimeout time.Duration
 	// PurgeInterval is how often expired records are deleted.
 	PurgeInterval time.Duration
+}
+
+// Events configures the state change stream.
+type Events struct {
+	// MaxSubscribers caps concurrent streams per replica (0 means no limit).
+	MaxSubscribers int
+	// SubscriberBuffer is how many events may wait for a slow subscriber
+	// before it is disconnected.
+	SubscriberBuffer int
 }
 
 // minSecretLength is the minimum HS256 secret size (256 bits, RFC 7518).
@@ -117,6 +127,10 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			TTL:           p.dur("IDEMPOTENCY_TTL", 24*time.Hour),
 			LockTimeout:   p.dur("IDEMPOTENCY_LOCK_TIMEOUT", time.Minute),
 			PurgeInterval: p.dur("IDEMPOTENCY_PURGE_INTERVAL", 15*time.Minute),
+		},
+		Events: Events{
+			MaxSubscribers:   int(p.positiveInt32("EVENTS_MAX_SUBSCRIBERS", 1000)),
+			SubscriberBuffer: int(p.positiveInt32("EVENTS_SUBSCRIBER_BUFFER", 64)),
 		},
 		Log: Log{
 			Level:  p.level("LOG_LEVEL", slog.LevelInfo),

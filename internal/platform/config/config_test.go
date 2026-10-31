@@ -65,6 +65,9 @@ func TestFromLookupDefaults(t *testing.T) {
 	if cfg.Idempotency != want {
 		t.Errorf("idempotency = %+v, want %+v", cfg.Idempotency, want)
 	}
+	if cfg.Events != (config.Events{MaxSubscribers: 1000, SubscriberBuffer: 64}) {
+		t.Errorf("events = %+v", cfg.Events)
+	}
 }
 
 func TestFromLookupJWKS(t *testing.T) {

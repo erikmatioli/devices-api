@@ -19,6 +19,7 @@ import (
 
 	"github.com/erikmatioli/devices-api/internal/app"
 	"github.com/erikmatioli/devices-api/internal/auth"
+	"github.com/erikmatioli/devices-api/internal/events"
 	"github.com/erikmatioli/devices-api/internal/httpapi"
 	"github.com/erikmatioli/devices-api/internal/platform/config"
 	"github.com/erikmatioli/devices-api/internal/platform/logger"
@@ -87,13 +88,19 @@ func run() error {
 	idempotencyStore := postgres.NewIdempotencyStore(pool, cfg.Idempotency.TTL, cfg.Idempotency.LockTimeout)
 	go idempotencyStore.RunPurge(ctx, cfg.Idempotency.PurgeInterval, log)
 
+	hub := events.NewHub(cfg.Events.SubscriberBuffer, cfg.Events.MaxSubscribers, nil)
+	listener := postgres.NewListener(pool, hub, log)
+	go listener.Run(ctx)
+
 	handler := httpapi.NewRouter(httpapi.Dependencies{
 		Logger:      log,
 		Devices:     devices,
 		Verifier:    verifier,
 		Idempotency: idempotencyStore,
+		Events:      hub,
 		Readiness: map[string]httpapi.CheckFunc{
-			"database": pool.Ping,
+			"database":        pool.Ping,
+			"events_listener": listener.Ready,
 		},
 	})
 
@@ -106,6 +113,9 @@ func run() error {
 		IdleTimeout:       cfg.HTTP.IdleTimeout,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
+	// Event streams never end on their own; closing the hub ends them so
+	// Shutdown can drain the remaining requests.
+	srv.RegisterOnShutdown(hub.Close)
 
 	serveErr := make(chan error, 1)
 	go func() {
