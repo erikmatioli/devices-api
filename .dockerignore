@@ -3,6 +3,7 @@
 bin
 dist
 docs
+deploy
 *.md
 coverage.*
 .env

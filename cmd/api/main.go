@@ -17,12 +17,16 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/metric/noop"
+
 	"github.com/erikmatioli/devices-api/internal/app"
 	"github.com/erikmatioli/devices-api/internal/auth"
 	"github.com/erikmatioli/devices-api/internal/events"
 	"github.com/erikmatioli/devices-api/internal/httpapi"
 	"github.com/erikmatioli/devices-api/internal/platform/config"
 	"github.com/erikmatioli/devices-api/internal/platform/logger"
+	"github.com/erikmatioli/devices-api/internal/platform/telemetry"
 	"github.com/erikmatioli/devices-api/internal/postgres"
 )
 
@@ -56,6 +60,25 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	tel, err := telemetry.Setup(ctx, logger.ServiceName, version)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := tel.Shutdown(flushCtx); err != nil {
+			log.Warn("telemetry shutdown", slog.Any("error", err))
+		}
+	}()
+	metrics, err := telemetry.NewMetrics(tel.MeterProvider)
+	if err != nil {
+		return fmt.Errorf("create metrics: %w", err)
+	}
+	if tel.OTLPEnabled {
+		log.Info("exporting traces and metrics over OTLP")
+	}
+
 	pool, err := postgres.NewPool(ctx, cfg.Database)
 	if err != nil {
 		return err
@@ -83,30 +106,46 @@ func run() error {
 		log.Warn("access tokens are verified with a shared HS256 secret; use AUTH_JWKS_URL in production")
 	}
 
-	devices := app.NewService(postgres.NewDeviceRepository(pool))
+	devices := app.NewService(postgres.NewDeviceRepository(pool), app.WithMetrics(metrics))
 
 	idempotencyStore := postgres.NewIdempotencyStore(pool, cfg.Idempotency.TTL, cfg.Idempotency.LockTimeout)
 	go idempotencyStore.RunPurge(ctx, cfg.Idempotency.PurgeInterval, log)
 
-	hub := events.NewHub(cfg.Events.SubscriberBuffer, cfg.Events.MaxSubscribers, nil)
+	hub := events.NewHub(cfg.Events.SubscriberBuffer, cfg.Events.MaxSubscribers, metrics)
 	listener := postgres.NewListener(pool, hub, log)
 	go listener.Run(ctx)
 
 	handler := httpapi.NewRouter(httpapi.Dependencies{
-		Logger:      log,
-		Devices:     devices,
-		Verifier:    verifier,
-		Idempotency: idempotencyStore,
-		Events:      hub,
+		Logger:         log,
+		Devices:        devices,
+		Verifier:       verifier,
+		Idempotency:    idempotencyStore,
+		Events:         hub,
+		Metrics:        metrics,
+		MetricsHandler: tel.MetricsHandler,
 		Readiness: map[string]httpapi.CheckFunc{
 			"database":        pool.Ping,
 			"events_listener": listener.Ready,
 		},
 	})
 
+	// Tracing is the outermost layer so every middleware runs inside the
+	// request span. HTTP metrics are recorded by the router with the matched
+	// route, so the handler's own metrics are disabled.
+	traced := otelhttp.NewHandler(handler, "http.server",
+		otelhttp.WithMeterProvider(noop.NewMeterProvider()),
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			switch r.URL.Path {
+			case "/healthz", "/readyz", "/metrics":
+				return false
+			}
+			return true
+		}),
+	)
+
 	srv := &http.Server{
 		Addr:              cfg.HTTP.Addr,
-		Handler:           handler,
+		Handler:           traced,
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,
