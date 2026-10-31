@@ -84,10 +84,14 @@ func run() error {
 
 	devices := app.NewService(postgres.NewDeviceRepository(pool))
 
+	idempotencyStore := postgres.NewIdempotencyStore(pool, cfg.Idempotency.TTL, cfg.Idempotency.LockTimeout)
+	go idempotencyStore.RunPurge(ctx, cfg.Idempotency.PurgeInterval, log)
+
 	handler := httpapi.NewRouter(httpapi.Dependencies{
-		Logger:   log,
-		Devices:  devices,
-		Verifier: verifier,
+		Logger:      log,
+		Devices:     devices,
+		Verifier:    verifier,
+		Idempotency: idempotencyStore,
 		Readiness: map[string]httpapi.CheckFunc{
 			"database": pool.Ping,
 		},

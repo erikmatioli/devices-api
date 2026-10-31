@@ -61,6 +61,10 @@ func TestFromLookupDefaults(t *testing.T) {
 	if cfg.Auth.HS256Secret != testSecret || cfg.Auth.Issuer != "https://issuer.test" {
 		t.Errorf("auth = %+v", cfg.Auth)
 	}
+	want := config.Idempotency{TTL: 24 * time.Hour, LockTimeout: time.Minute, PurgeInterval: 15 * time.Minute}
+	if cfg.Idempotency != want {
+		t.Errorf("idempotency = %+v, want %+v", cfg.Idempotency, want)
+	}
 }
 
 func TestFromLookupJWKS(t *testing.T) {
@@ -178,6 +182,11 @@ func TestFromLookupInvalid(t *testing.T) {
 			name:    "relative jwks url",
 			env:     map[string]string{"DATABASE_URL": "x", "AUTH_HS256_SECRET": "", "AUTH_JWKS_URL": "/jwks.json"},
 			wantErr: "AUTH_JWKS_URL must be an absolute http or https URL",
+		},
+		{
+			name:    "lock timeout shorter than write timeout",
+			env:     map[string]string{"DATABASE_URL": "x", "IDEMPOTENCY_LOCK_TIMEOUT": "10s", "HTTP_WRITE_TIMEOUT": "20s"},
+			wantErr: "IDEMPOTENCY_LOCK_TIMEOUT must be greater than HTTP_WRITE_TIMEOUT",
 		},
 		{
 			name:    "unknown log level",

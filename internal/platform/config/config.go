@@ -24,6 +24,7 @@ type Config struct {
 	HTTP            HTTP
 	Database        Database
 	Auth            Auth
+	Idempotency     Idempotency
 	Log             Log
 	ShutdownTimeout time.Duration
 }
@@ -56,6 +57,17 @@ type Auth struct {
 	JWKSURL     string
 	JWKSRefresh time.Duration
 	ClockSkew   time.Duration
+}
+
+// Idempotency configures how long Idempotency-Key responses are kept.
+type Idempotency struct {
+	// TTL is how long a recorded response can be replayed.
+	TTL time.Duration
+	// LockTimeout is how long a request may stay in progress before its key
+	// is considered abandoned. It must exceed the HTTP write timeout.
+	LockTimeout time.Duration
+	// PurgeInterval is how often expired records are deleted.
+	PurgeInterval time.Duration
 }
 
 // minSecretLength is the minimum HS256 secret size (256 bits, RFC 7518).
@@ -101,6 +113,11 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			JWKSRefresh: p.dur("AUTH_JWKS_REFRESH", 15*time.Minute),
 			ClockSkew:   p.dur("AUTH_CLOCK_SKEW", 30*time.Second),
 		},
+		Idempotency: Idempotency{
+			TTL:           p.dur("IDEMPOTENCY_TTL", 24*time.Hour),
+			LockTimeout:   p.dur("IDEMPOTENCY_LOCK_TIMEOUT", time.Minute),
+			PurgeInterval: p.dur("IDEMPOTENCY_PURGE_INTERVAL", 15*time.Minute),
+		},
 		Log: Log{
 			Level:  p.level("LOG_LEVEL", slog.LevelInfo),
 			Format: p.oneOf("LOG_FORMAT", LogFormatJSON, LogFormatJSON, LogFormatText),
@@ -112,6 +129,9 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		p.fail("DATABASE_MIN_CONNS", "must not exceed DATABASE_MAX_CONNS")
 	}
 	validateAuth(&p, cfg.Auth)
+	if cfg.Idempotency.LockTimeout <= cfg.HTTP.WriteTimeout {
+		p.fail("IDEMPOTENCY_LOCK_TIMEOUT", "must be greater than HTTP_WRITE_TIMEOUT")
+	}
 
 	if err := p.err(); err != nil {
 		return Config{}, err
