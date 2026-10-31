@@ -105,6 +105,12 @@ An invalid value stops the process with a message that lists every problem.
 | `DATABASE_MIN_CONNS` | `2` | Connections kept open when idle |
 | `DATABASE_CONNECT_TIMEOUT` | `5s` | Timeout to connect and to the startup ping |
 | `DATABASE_AUTO_MIGRATE` | `true` | Apply pending schema migrations at startup |
+| `AUTH_ISSUER` | **required** | Expected `iss` claim |
+| `AUTH_AUDIENCE` | **required** | Expected `aud` claim |
+| `AUTH_HS256_SECRET` | — | Shared secret (at least 32 bytes) for local tokens |
+| `AUTH_JWKS_URL` | — | Identity provider key set; use instead of the secret in production |
+| `AUTH_JWKS_REFRESH` | `15m` | How often the key set is fetched again |
+| `AUTH_CLOCK_SKEW` | `30s` | Tolerance on `exp`, `nbf` and `iat` |
 | `HTTP_ADDR` | `:8080` | Listen address |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Time allowed to read request headers |
 | `HTTP_READ_TIMEOUT` | `10s` | Time allowed to read the whole request |
@@ -114,8 +120,45 @@ An invalid value stops the process with a message that lists every problem.
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `LOG_FORMAT` | `json` | `json` for machines, `text` for local reading |
 
+Exactly one of `AUTH_HS256_SECRET` and `AUTH_JWKS_URL` must be set. The
+service logs a warning at startup when it runs with a shared secret.
+
 Compose also reads `API_PORT` and `POSTGRES_PORT` (both host ports) and
 `VERSION` (image build argument).
+
+### Access tokens
+
+Every `/v1` endpoint needs a bearer token with the right scope:
+
+| Scope | Operations |
+|---|---|
+| `devices:read` | list and fetch devices, event stream |
+| `devices:write` | create, replace, patch |
+| `devices:delete` | delete |
+
+Locally, mint a token signed with the shared secret from `.env`:
+
+```bash
+make token                                   # all scopes, 1 hour
+make token SCOPE="devices:read" TTL=10m      # read-only
+docker compose run --rm tokengen -scope "devices:read devices:write"
+```
+
+Then call the API:
+
+```bash
+TOKEN=$(make -s token)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/devices
+```
+
+In `/docs`, use **Authorize** and paste the token. The `tokengen` binary is
+built into a separate image target and is never shipped in the API image.
+
+In production, point `AUTH_JWKS_URL` at the identity provider (for example
+`https://<tenant>/.well-known/jwks.json`) and remove the secret. Keys are
+cached and refreshed every `AUTH_JWKS_REFRESH`, and a token signed with an
+unknown key id triggers a rate-limited refresh, so key rotation needs no
+restart.
 
 ## 4. Everyday commands
 
@@ -130,6 +173,7 @@ Compose also reads `API_PORT` and `POSTGRES_PORT` (both host ports) and
 | `make lint` | golangci-lint |
 | `make fmt` | Format code (gofmt and goimports) |
 | `make tidy` | `go mod tidy` and `go mod verify` |
+| `make token` | Print a development access token (`SUB`, `SCOPE`, `TTL`) |
 | `make up` / `make down` | Start or stop the Compose stack |
 | `make logs` | Follow API logs |
 | `make docker-build` | Build the image tagged with the git version |
@@ -157,6 +201,8 @@ checks plus an image build.
 
 ```
 cmd/api/              entry point: wiring, HTTP server, graceful shutdown
+cmd/tokengen/         development helper that mints local access tokens
+internal/auth/        JWT verification (HS256 or JWKS) and the request principal
 internal/device/      domain model and business rules (no I/O)
 internal/app/         use cases and the ports they need (repository interface)
 internal/app/apptest/ in-memory repository used by service and handler tests
@@ -244,4 +290,6 @@ The binary reports its version in every log record (`version` field).
 | Integration tests fail with `Cannot connect to the Docker daemon` | Start Docker, or set `TEST_DATABASE_URL` to an existing PostgreSQL. |
 | `Dirty database version N` at startup | A migration failed halfway. Fix the cause, then run `migrate ... force N-1` and restart. |
 | `-race requires cgo` | Install a C compiler, or run without `-race` (`make test` does this on Windows). |
+| `401` with `error="invalid_token"` | The token expired, or it was minted with a different secret, issuer or audience than the API uses. Mint a new one with the same `.env`. |
+| `403` with `error="insufficient_scope"` | The token lacks the scope named in the header. Mint one with `SCOPE=...`. |
 | `go` or `make` not found after installing | Open a new terminal so `PATH` is reloaded. |

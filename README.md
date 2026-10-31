@@ -3,8 +3,8 @@
 REST API written in Go to persist and manage device resources, with real-time
 notifications of device state changes.
 
-> **Status:** in progress. The device endpoints are available; authentication,
-> idempotency, notifications and telemetry follow the
+> **Status:** in progress. The device endpoints and JWT authorization are
+> available; idempotency, notifications and telemetry follow the
 > [delivery plan](docs/delivery-plan.md).
 
 ## Features
@@ -61,7 +61,21 @@ make up
 curl http://localhost:8080/readyz
 ```
 
-Without `make`, run `docker compose up --build -d`.
+Every `/v1` endpoint requires a JWT with the matching scope. Mint a local
+token and use it:
+
+```bash
+TOKEN=$(docker compose run --rm tokengen)
+curl -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"name":"Pixel 9","brand":"Google"}' \
+     http://localhost:8080/v1/devices
+```
+
+Without `make`, run `docker compose --profile tools build` and then
+`docker compose up -d`. Building first keeps the build output out of
+`$TOKEN`. Interactive documentation is at <http://localhost:8080/docs> (use
+**Authorize** with the token).
 
 | Task | Command |
 |---|---|

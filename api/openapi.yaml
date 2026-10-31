@@ -393,9 +393,15 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        JWT validated for `iss`, `aud`, `exp` and `nbf`. Authorization uses the
-        space-separated `scope` claim: `devices:read`, `devices:write`,
-        `devices:delete`.
+        JWT access token. The signature (HS256 locally, RS/PS/ES/EdDSA keys
+        from a JWKS endpoint in production) and the `iss`, `aud`, `exp`,
+        `nbf` and `iat` claims are validated, and `sub` is required.
+        Authorization uses the space-separated `scope` claim (or the `scp`
+        array): `devices:read`, `devices:write`, `devices:delete`.
+
+        Failures follow RFC 6750: `401` with
+        `WWW-Authenticate: Bearer error="invalid_token"`, or `403` with
+        `error="insufficient_scope"` and the scope that is missing.
 
   parameters:
     DeviceId:
@@ -648,6 +654,11 @@ components:
             $ref: '#/components/schemas/Problem'
     Forbidden:
       description: The token does not carry the required scope.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            example: Bearer realm="devices-api", error="insufficient_scope", scope="devices:write"
       content:
         application/problem+json:
           schema:

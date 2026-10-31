@@ -197,7 +197,11 @@ Clarifications:
     JWKS URL in production, and an HS256 shared secret is used locally.
   - The `iss`, `aud`, `exp` and `nbf` claims are validated. Allowed clock skew
     is 30 seconds.
-  - Authorization uses the space-separated `scope` claim:
+  - `sub` is required. The accepted algorithms are pinned per mode (HS256
+    only with a secret; RS, PS, ES and EdDSA only with JWKS), which blocks
+    `alg: none` and algorithm-confusion tokens.
+  - Authorization uses the space-separated `scope` claim, or the `scp`
+    array some identity providers emit:
 
 | Scope | Grants |
 |---|---|
@@ -211,7 +215,10 @@ Clarifications:
   - Health, readiness, metrics and documentation endpoints stay public; in
     production they should be reachable only from the internal network.
   - `cmd/tokengen` mints local tokens, so no identity provider is needed to
-    try the API.
+    try the API. It is built as a separate image target and never ships in
+    the API image.
+  - The rejection reason is logged, never returned, and the access log
+    records the token subject of every authenticated request.
 
 ### ADR-08: Idempotency keys
 
