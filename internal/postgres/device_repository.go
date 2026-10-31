@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/erikmatioli/devices-api/internal/app"
 	"github.com/erikmatioli/devices-api/internal/device"
+	"github.com/erikmatioli/devices-api/internal/events"
 )
 
 const deviceColumns = "id, name, brand, state, creation_time, version"
@@ -105,6 +107,11 @@ func (r *DeviceRepository) List(ctx context.Context, f app.ListFilter) (app.Page
 // Update implements app.DeviceRepository. The row lock taken by
 // SELECT ... FOR UPDATE serializes concurrent updates of the same device, so
 // the rules in fn always see the latest committed state.
+//
+// A state change is announced with pg_notify inside the same transaction.
+// PostgreSQL delivers notifications only when the transaction commits and
+// discards them on rollback, so subscribers never hear about a change that
+// was not persisted.
 func (r *DeviceRepository) Update(ctx context.Context, id uuid.UUID, fn app.UpdateFunc) (device.Device, error) {
 	var out device.Device
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
@@ -129,6 +136,16 @@ func (r *DeviceRepository) Update(ctx context.Context, id uuid.UUID, fn app.Upda
 			d.ID(), d.Name(), d.Brand(), string(d.State())))
 		if err != nil {
 			return fmt.Errorf("update device: %w", err)
+		}
+
+		if upd.StateChange != nil {
+			payload, err := json.Marshal(events.FromStateChange(device.NewID(), *upd.StateChange))
+			if err != nil {
+				return fmt.Errorf("encode state change: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `SELECT pg_notify($1, $2)`, StateChangedChannel, string(payload)); err != nil {
+				return fmt.Errorf("notify state change: %w", err)
+			}
 		}
 		return nil
 	})
