@@ -34,6 +34,9 @@ services:
       <<: *auth-env
       DATABASE_URL: postgres://devices:devices@postgres:5432/devices?sslmode=disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Set by `make observability` to push telemetry to the collector.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=local
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:
@@ -49,6 +52,29 @@ services:
       target: tokengen
     environment:
       <<: *auth-env
+
+  # Observability stack: make observability
+  otel-collector:
+    profiles: [observability]
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./deploy/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    depends_on: [jaeger]
+
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/all-in-one:1.64.0
+    ports:
+      - "${JAEGER_PORT:-16686}:16686"
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.0.1
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
 
 volumes:
   pgdata:
