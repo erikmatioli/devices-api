@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/erikmatioli/devices-api/internal/app"
 	"github.com/erikmatioli/devices-api/internal/httpapi"
 	"github.com/erikmatioli/devices-api/internal/platform/config"
 	"github.com/erikmatioli/devices-api/internal/platform/logger"
@@ -65,8 +66,11 @@ func run() error {
 		}
 	}
 
+	devices := app.NewService(postgres.NewDeviceRepository(pool))
+
 	handler := httpapi.NewRouter(httpapi.Dependencies{
-		Logger: log,
+		Logger:  log,
+		Devices: devices,
 		Readiness: map[string]httpapi.CheckFunc{
 			"database": pool.Ping,
 		},
