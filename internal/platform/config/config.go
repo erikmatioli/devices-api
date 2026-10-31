@@ -41,6 +41,8 @@ type Database struct {
 	MaxConns       int32
 	MinConns       int32
 	ConnectTimeout time.Duration
+	// AutoMigrate applies pending schema migrations at startup.
+	AutoMigrate bool
 }
 
 // Log configures the structured logger.
@@ -73,6 +75,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			MaxConns:       p.positiveInt32("DATABASE_MAX_CONNS", 10),
 			MinConns:       p.positiveInt32("DATABASE_MIN_CONNS", 2),
 			ConnectTimeout: p.dur("DATABASE_CONNECT_TIMEOUT", 5*time.Second),
+			AutoMigrate:    p.boolean("DATABASE_AUTO_MIGRATE", true),
 		},
 		Log: Log{
 			Level:  p.level("LOG_LEVEL", slog.LevelInfo),
@@ -153,6 +156,19 @@ func (p *parser) positiveInt32(key string, def int32) int32 {
 		return def
 	}
 	return int32(n)
+}
+
+func (p *parser) boolean(key string, def bool) bool {
+	v, ok := p.value(key)
+	if !ok {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		p.fail(key, "must be true or false")
+		return def
+	}
+	return b
 }
 
 func (p *parser) level(key string, def slog.Level) slog.Level {

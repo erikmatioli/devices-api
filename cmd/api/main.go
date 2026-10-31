@@ -59,6 +59,12 @@ func run() error {
 	}
 	defer pool.Close()
 
+	if cfg.Database.AutoMigrate {
+		if err := postgres.Migrate(pool, log); err != nil {
+			return err
+		}
+	}
+
 	handler := httpapi.NewRouter(httpapi.Dependencies{
 		Logger: log,
 		Readiness: map[string]httpapi.CheckFunc{

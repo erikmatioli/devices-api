@@ -39,18 +39,22 @@ func TestFromLookupDefaults(t *testing.T) {
 	if cfg.ShutdownTimeout != 15*time.Second {
 		t.Errorf("ShutdownTimeout = %v, want 15s", cfg.ShutdownTimeout)
 	}
+	if !cfg.Database.AutoMigrate {
+		t.Error("AutoMigrate should default to true")
+	}
 }
 
 func TestFromLookupOverrides(t *testing.T) {
 	cfg, err := config.FromLookup(lookupFrom(map[string]string{
-		"DATABASE_URL":       "postgres://db/devices",
-		"HTTP_ADDR":          " :9090 ",
-		"HTTP_READ_TIMEOUT":  "3s",
-		"DATABASE_MAX_CONNS": "25",
-		"DATABASE_MIN_CONNS": "5",
-		"LOG_LEVEL":          "debug",
-		"LOG_FORMAT":         "TEXT",
-		"SHUTDOWN_TIMEOUT":   "1m",
+		"DATABASE_URL":          "postgres://db/devices",
+		"HTTP_ADDR":             " :9090 ",
+		"HTTP_READ_TIMEOUT":     "3s",
+		"DATABASE_MAX_CONNS":    "25",
+		"DATABASE_MIN_CONNS":    "5",
+		"LOG_LEVEL":             "debug",
+		"LOG_FORMAT":            "TEXT",
+		"SHUTDOWN_TIMEOUT":      "1m",
+		"DATABASE_AUTO_MIGRATE": "false",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -70,6 +74,9 @@ func TestFromLookupOverrides(t *testing.T) {
 	}
 	if cfg.ShutdownTimeout != time.Minute {
 		t.Errorf("ShutdownTimeout = %v, want 1m", cfg.ShutdownTimeout)
+	}
+	if cfg.Database.AutoMigrate {
+		t.Error("AutoMigrate should be disabled")
 	}
 }
 
@@ -108,6 +115,11 @@ func TestFromLookupInvalid(t *testing.T) {
 			name:    "min above max",
 			env:     map[string]string{"DATABASE_URL": "x", "DATABASE_MAX_CONNS": "2", "DATABASE_MIN_CONNS": "3"},
 			wantErr: "DATABASE_MIN_CONNS must not exceed DATABASE_MAX_CONNS",
+		},
+		{
+			name:    "malformed boolean",
+			env:     map[string]string{"DATABASE_URL": "x", "DATABASE_AUTO_MIGRATE": "maybe"},
+			wantErr: "DATABASE_AUTO_MIGRATE must be true or false",
 		},
 		{
 			name:    "unknown log level",
