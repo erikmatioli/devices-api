@@ -49,8 +49,8 @@ flowchart LR
 
 The code follows a ports-and-adapters (hexagonal) layout. Dependencies only
 point inwards: adapters depend on the application layer, the application layer
-depends on the domain, and the domain depends on nothing but the standard
-library.
+depends on the domain, and the domain depends only on the standard library
+and a UUID package.
 
 ```
 cmd/
@@ -72,7 +72,7 @@ Dockerfile              # multi-stage build into a distroless image
 
 | Layer | Knows about | Must not know about |
 |---|---|---|
-| `device` | Go standard library | HTTP, SQL, JSON tags for transport |
+| `device` | Standard library, `google/uuid` | HTTP, SQL, JSON tags for transport |
 | `app` | `device`, port interfaces | `net/http`, `pgx` |
 | `httpapi` | `app`, `device` errors | SQL |
 | `postgres` | `app` ports, `device` | HTTP |
@@ -102,6 +102,9 @@ Clarifications:
 - The `in-use` rule is evaluated against the stored state, so one request
   cannot move a device out of `in-use` and rename it in the same call. The
   client has to change the state first and then update the name or brand.
+- The opposite direction is allowed: a request may rename an `available`
+  device and set it to `in-use` at once, because the stored state is not
+  `in-use` yet.
 - Sending the current value of `name` or `brand` for an `in-use` device is
   treated as a no-op and accepted, so full `PUT` bodies built from a previous
   `GET` keep working.
