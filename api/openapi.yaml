@@ -548,7 +548,7 @@ components:
           example: name
         code:
           type: string
-          enum: [required, too_short, too_long, invalid_value, invalid_type, unknown_field, read_only]
+          enum: [required, too_long, invalid_value, invalid_type, unknown_field, read_only]
         message:
           type: string
           example: must be at most 100 characters
