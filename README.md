@@ -1,0 +1,53 @@
+# Devices API
+
+REST API written in Go to persist and manage device resources, with real-time
+notifications of device state changes.
+
+> **Status:** design phase. The contract and architecture are defined; the
+> implementation follows the [delivery plan](docs/delivery-plan.md).
+
+## Features
+
+- Create, fully replace, partially update (JSON Merge Patch), fetch and delete
+  devices.
+- List devices with `brand` and `state` filters and cursor pagination.
+- Domain rules enforced atomically in the database:
+  - `creation_time` is read-only.
+  - `name` and `brand` are locked while a device is `in-use`.
+  - Devices that are `in-use` cannot be deleted.
+- Server-Sent Events stream with the device id, previous state and new state.
+  Events are emitted only after the change is committed.
+- JWT authentication with per-operation scopes.
+- `Idempotency-Key` support for safe retries on create.
+- Optimistic concurrency with `ETag` / `If-Match`.
+- RFC 9457 problem details, with `422` for validation errors.
+- Structured JSON logs, OpenTelemetry traces and metrics, and a Prometheus
+  endpoint.
+- Container image with PostgreSQL in Docker Compose.
+
+## Documentation
+
+| Document | Content |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | Components, layers, domain rules and decision records |
+| [`docs/flows.md`](docs/flows.md) | Sequence diagrams for every use case |
+| [`docs/delivery-plan.md`](docs/delivery-plan.md) | Phases, exit criteria and acceptance tracking |
+| [`api/openapi.yaml`](api/openapi.yaml) | OpenAPI 3.1 contract |
+
+## API overview
+
+| Method | Path | Scope | Description |
+|---|---|---|---|
+| `POST` | `/v1/devices` | `devices:write` | Create a device |
+| `GET` | `/v1/devices` | `devices:read` | List devices (`brand`, `state`, `limit`, `cursor`) |
+| `GET` | `/v1/devices/{id}` | `devices:read` | Fetch a device |
+| `PUT` | `/v1/devices/{id}` | `devices:write` | Fully update a device |
+| `PATCH` | `/v1/devices/{id}` | `devices:write` | Partially update a device |
+| `DELETE` | `/v1/devices/{id}` | `devices:delete` | Delete a device |
+| `GET` | `/v1/devices/events` | `devices:read` | Stream state changes (SSE) |
+| `GET` | `/healthz`, `/readyz` | public | Liveness and readiness |
+| `GET` | `/metrics` | public | Prometheus metrics |
+
+## Getting started
+
+Instructions to build, run and test the service are added in phase 1.
