@@ -41,6 +41,12 @@ test: ## Run unit tests
 test-integration: ## Run unit and integration tests (needs Docker)
 	go test $(TEST_FLAGS) -tags=integration -count=1 ./...
 
+.PHONY: test-docker
+test-docker: ## Run all tests with the race detector in a Linux container (needs `make up`)
+	docker run --rm --network devices-api_default -v "$(CURDIR):/src" -v devices-api-gomod:/go/pkg/mod -w /src \
+	  -e TEST_DATABASE_URL="postgres://devices:devices@postgres:5432/devices?sslmode=disable" \
+	  golang:1.27 go test -race -tags=integration -count=1 ./...
+
 .PHONY: cover
 cover: ## Run all tests with coverage and print the summary (needs Docker)
 	go test $(TEST_FLAGS) -tags=integration -count=1 -covermode=atomic -coverprofile=$(COVER) ./...
@@ -67,6 +73,12 @@ TTL   ?= 1h
 .PHONY: token
 token: ## Print a development access token (SUB, SCOPE, TTL)
 	@go run ./cmd/tokengen -sub "$(SUB)" -scope "$(SCOPE)" -ttl $(TTL)
+
+.PHONY: load
+load: ## Run the k6 smoke load test against the running stack (VUS, DURATION)
+	docker run --rm -i --network devices-api_default -e BASE_URL=http://api:8080 \
+	  -e TOKEN="$$(go run ./cmd/tokengen -ttl 10m)" -e VUS=$(or $(VUS),20) -e DURATION=$(or $(DURATION),30s) \
+	  grafana/k6:0.55.0 run - < test/load/smoke.js
 
 .PHONY: up
 up: ## Build the images (API and tokengen) and start the API and PostgreSQL
