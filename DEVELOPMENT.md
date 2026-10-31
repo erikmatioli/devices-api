@@ -8,16 +8,16 @@ this way, see [`docs/architecture.md`](docs/architecture.md).
 
 | Tool | Version | Used for |
 |---|---|---|
-| Go | 1.25.11 or newer | Building and testing |
+| Go | 1.26 or newer | Building and testing |
 | Docker with Compose v2 | 24 or newer | PostgreSQL, the container image, integration tests |
 | GNU Make | 4.x | Developer shortcuts (optional, every target is a plain command) |
 | golangci-lint | 2.x | Linting and formatting |
 | Git | any recent | Version control |
 
-Go 1.25 is the minimum because the PostgreSQL driver (`pgx` v5.12) requires
-it, and the test dependencies pin the 1.25.11 patch release. With the default
-`GOTOOLCHAIN=auto`, an older 1.25.x downloads the right toolchain by itself.
-The container image is built with the latest Go release.
+Go 1.26 is the minimum because the OpenTelemetry SDK requires it (the brief
+asks for 1.23 or newer). With the default `GOTOOLCHAIN=auto`, an older Go
+downloads the right toolchain by itself. The container image is built with
+the latest Go release.
 
 ### Installing the tools
 
@@ -125,6 +125,10 @@ An invalid value stops the process with a message that lists every problem.
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `LOG_FORMAT` | `json` | `json` for machines, `text` for local reading |
 
+The standard OpenTelemetry variables are honoured as well, for example
+`OTEL_EXPORTER_OTLP_ENDPOINT` (enables OTLP export of traces and metrics),
+`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` and `OTEL_TRACES_SAMPLER`.
+
 Exactly one of `AUTH_HS256_SECRET` and `AUTH_JWKS_URL` must be set. The
 service logs a warning at startup when it runs with a shared secret.
 
@@ -179,6 +183,35 @@ cached and refreshed every `AUTH_JWKS_REFRESH`, and a token signed with an
 unknown key id triggers a rate-limited refresh, so key rotation needs no
 restart.
 
+### Observability
+
+| Signal | Where |
+|---|---|
+| Logs | JSON on stdout, with `request_id`, `subject`, `trace_id` and `span_id` |
+| Metrics | `GET /metrics` (Prometheus format), plus OTLP push when an endpoint is set |
+| Traces | OTLP/HTTP to `OTEL_EXPORTER_OTLP_ENDPOINT`; one span per request and per SQL statement |
+
+`make observability` starts the API with an OpenTelemetry Collector, Jaeger
+and Prometheus:
+
+| UI | URL |
+|---|---|
+| Jaeger (traces) | <http://localhost:16686> (service `devices-api`) |
+| Prometheus (metrics) | <http://localhost:9090> |
+
+Useful queries:
+
+```promql
+histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_request_duration_seconds_bucket[5m])))
+sum by (http_route, http_response_status_code) (rate(http_server_request_duration_seconds_count[5m]))
+sum by (from, to) (increase(devices_state_transitions_total[1h]))
+devices_events_subscribers
+sum by (outcome) (rate(idempotency_requests_total[5m]))
+```
+
+Spans are always created, so `trace_id` appears in logs even without a
+collector; they are only exported when an OTLP endpoint is configured.
+
 ## 4. Everyday commands
 
 | Command | What it does |
@@ -194,6 +227,7 @@ restart.
 | `make tidy` | `go mod tidy` and `go mod verify` |
 | `make token` | Print a development access token (`SUB`, `SCOPE`, `TTL`) |
 | `make up` / `make down` | Start or stop the Compose stack |
+| `make observability` | Start the stack plus collector, Jaeger and Prometheus |
 | `make logs` | Follow API logs |
 | `make docker-build` | Build the image tagged with the git version |
 
@@ -227,10 +261,11 @@ internal/idempotency/ Idempotency-Key contract and in-memory store
 internal/device/      domain model and business rules (no I/O)
 internal/app/         use cases and the ports they need (repository interface)
 internal/app/apptest/ in-memory repository used by service and handler tests
-internal/platform/    configuration and logger
+internal/platform/    configuration, logger and telemetry (OpenTelemetry, Prometheus)
 internal/httpapi/     routes, middleware, request decoding, problem responses, docs
 internal/postgres/    pool, repositories, LISTEN loop and embedded SQL migrations
 api/openapi.yaml      API contract, embedded and served at /openapi.yaml and /docs
+deploy/               collector and Prometheus configuration for `make observability`
 docs/                 architecture, flows and delivery plan
 ```
 
@@ -315,6 +350,7 @@ The binary reports its version in every log record (`version` field).
 | `422` "Idempotency key reused" | The key was already used with a different body. Use a new key per distinct request. |
 | Event stream connects but events arrive in bursts or never | A proxy is buffering the response. Disable buffering for `text/event-stream` (the API already sends `X-Accel-Buffering: no` for nginx). |
 | `/readyz` reports `events_listener: unavailable` | The dedicated `LISTEN` connection is down; it reconnects with backoff. Check database connectivity and `max_connections`. |
+| No traces in Jaeger | The API only exports when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; start with `make observability`, not `make up`. Probes and `/metrics` are not traced. |
 | `401` with `error="invalid_token"` | The token expired, or it was minted with a different secret, issuer or audience than the API uses. Mint a new one with the same `.env`. |
 | `403` with `error="insufficient_scope"` | The token lacks the scope named in the header. Mint one with `SCOPE=...`. |
 | `go` or `make` not found after installing | Open a new terminal so `PATH` is reloaded. |

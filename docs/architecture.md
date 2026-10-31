@@ -270,8 +270,10 @@ Clarifications:
   `request_id`, `trace_id`, `span_id`, method, route, status and duration.
   Log keys and messages are in English.
 - **Traces:** OpenTelemetry SDK. Instrumentation uses `otelhttp` for inbound
-  HTTP and `otelpgx` for queries. Traces are exported over OTLP when
-  `OTEL_EXPORTER_OTLP_ENDPOINT` is set; otherwise no exporter is configured.
+  HTTP (the span is renamed to the matched route) and `otelpgx` for queries.
+  W3C trace context is propagated. Spans are always recorded so logs carry
+  `trace_id`; they are exported over OTLP/HTTP only when
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Probes and `/metrics` are not traced.
 - **Metrics:** OpenTelemetry metrics API. The Prometheus exporter serves
   `/metrics`, and OTLP export can be enabled with the same environment
   variables. Main instruments:
@@ -281,12 +283,17 @@ Clarifications:
 | `http.server.request.duration` | histogram | `http.request.method`, `http.route`, `http.response.status_code` |
 | `devices.created` | counter | — |
 | `devices.deleted` | counter | — |
-| `devices.state.transitions` | counter | `from`, `to` |
+| `devices.state.transitions` | counter | `from`, `to` (recorded after commit) |
 | `devices.events.subscribers` | up-down counter | — |
-| `devices.events.dropped` | counter | `reason` |
-| `idempotency.replays` | counter | — |
-| `db.client.connections.*` | gauges | pool statistics |
+| Go runtime and process | gauges | `go_*`, `process_*` |
+| `devices.events.dropped_subscribers` | counter | — |
+| `idempotency.requests` | counter | `outcome` (started, replayed, mismatch, in_progress) |
+| `pgxpool.*` | gauges and counters | pool statistics from `otelpgx` |
 
+- **Ports:** the application, HTTP layer and hub record through small
+  interfaces (`app.Metrics`, `httpapi.Metrics`, `events.Observer`)
+  implemented by `telemetry.Metrics`, so only the telemetry package imports
+  the OpenTelemetry SDK.
 - **Health:** `GET /healthz` (liveness, process only) and `GET /readyz`
   (database ping and listener connected).
 

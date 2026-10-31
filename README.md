@@ -3,10 +3,8 @@
 REST API written in Go to persist and manage device resources, with real-time
 notifications of device state changes.
 
-> **Status:** in progress. The device endpoints, JWT authorization,
-> idempotency keys and state change notifications are available; telemetry
-> follows the
-> [delivery plan](docs/delivery-plan.md).
+> **Status:** in progress. Every feature is implemented; the final hardening
+> follows the [delivery plan](docs/delivery-plan.md).
 
 ## Features
 
@@ -53,7 +51,7 @@ notifications of device state changes.
 
 ## Getting started
 
-Requirements: Docker with Compose v2. Building from source also needs Go 1.25
+Requirements: Docker with Compose v2. Building from source also needs Go 1.26
 or newer.
 
 ```bash
