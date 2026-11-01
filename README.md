@@ -6,6 +6,7 @@ of state changes in real time.
 
 ## Contents
 
+- [Scope](#scope)
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Using the API](#using-the-api)
@@ -17,6 +18,36 @@ of state changes in real time.
 - [Known limitations](#known-limitations)
 - [Future improvements](#future-improvements)
 - [Further documentation](#further-documentation)
+
+## Scope
+
+The assignment asks for a device CRUD with filtering by brand and state, three
+domain rules, persistence, tests, documentation and a container image. That
+core is small and can be reviewed on its own:
+
+| Package | Holds |
+|---|---|
+| [`internal/device`](internal/device) | The entity and its rules, with no I/O |
+| [`internal/app`](internal/app) | Use cases and the repository port |
+| [`internal/httpapi/devices.go`](internal/httpapi/devices.go) | The HTTP handlers |
+| [`internal/postgres/device_repository.go`](internal/postgres/device_repository.go) | Persistence |
+
+Everything below was added on purpose. Each item is isolated from the core and
+is optional at runtime or lives outside the binary.
+
+| Addition | Why | Footprint |
+|---|---|---|
+| `ETag` / `If-Match` | A client writing from a stale read could overwrite a concurrent change and get around the `in-use` rule | One `version` column; `If-Match` is optional |
+| `422` problem documents | Clients see every invalid field in one response | Error mapping in `httpapi` |
+| Cursor pagination | An unbounded list does not hold up as the table grows | Pages of 20 by default, `cursor` for the next one |
+| `Idempotency-Key` | A retried create must not produce a duplicate device | One middleware on `POST /v1/devices` and one table; the header is optional |
+| JWT scopes | Reading, writing and deleting are separate permissions | HS256 with a local secret; JWKS only when `AUTH_JWKS_URL` is set |
+| Event stream (SSE) | State changes must be announced only after they are persisted; `pg_notify` inside the update transaction guarantees that across replicas without a message broker | One listening connection per replica |
+| OpenTelemetry and Prometheus | Traces, metrics and trace-correlated logs for running it in production | OTLP export only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; the collector, Jaeger and Prometheus start only with `make observability` |
+| k6, Postman collection, CI | Repeatable evidence that the behaviour holds | Outside the binary |
+
+The reasoning and the alternatives considered for each decision are recorded
+in [docs/architecture.md](docs/architecture.md).
 
 ## Features
 
@@ -36,7 +67,8 @@ of state changes in real time.
 ## Quick start
 
 Requirements: Docker with Compose v2. Building from source also needs Go 1.26
-or newer and GNU Make (optional).
+or newer and GNU Make (optional; on Windows it also needs Git for Windows,
+whose shell runs the `Makefile` recipes).
 
 ```bash
 cp .env.example .env
