@@ -1,0 +1,152 @@
+# Recording and alerting rules for the Devices API.
+#
+# Service level objectives, measured on the /v1 API (the event stream is left
+# out because a stream lasts as long as the client keeps it open):
+#   - availability: 99.9% of requests answer without a 5xx status;
+#   - latency: 99% of requests complete within 500 ms.
+# The alerts follow the multi-window burn-rate approach: they fire when the
+# error budget is being spent fast enough to run out well before the end of a
+# 30-day window, and the short window makes them clear soon after a recovery.
+# docs/observability.md explains each alert and what to do about it.
+
+groups:
+  - name: devices-api-slo
+    rules:
+      - record: job:devices_api_requests:rate5m
+        expr: sum by (job) (rate(http_server_request_duration_seconds_count{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events"}[5m]))
+      - record: job:devices_api_requests:rate30m
+        expr: sum by (job) (rate(http_server_request_duration_seconds_count{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events"}[30m]))
+      - record: job:devices_api_requests:rate1h
+        expr: sum by (job) (rate(http_server_request_duration_seconds_count{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events"}[1h]))
+      - record: job:devices_api_requests:rate6h
+        expr: sum by (job) (rate(http_server_request_duration_seconds_count{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events"}[6h]))
+
+      - record: job:devices_api_errors:rate5m
+        expr: sum by (job) (rate(http_server_request_duration_seconds_count{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events", http_response_status_code=~"5.."}[5m]))
+      - record: job:devices_api_errors:rate30m
+        expr: sum by (job) (rate(http_server_request_duration_seconds_count{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events", http_response_status_code=~"5.."}[30m]))
+      - record: job:devices_api_errors:rate1h
+        expr: sum by (job) (rate(http_server_request_duration_seconds_count{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events", http_response_status_code=~"5.."}[1h]))
+      - record: job:devices_api_errors:rate6h
+        expr: sum by (job) (rate(http_server_request_duration_seconds_count{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events", http_response_status_code=~"5.."}[6h]))
+
+      - record: job:devices_api_fast_requests:rate5m
+        expr: sum by (job) (rate(http_server_request_duration_seconds_bucket{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events", le="0.5"}[5m]))
+      - record: job:devices_api_fast_requests:rate30m
+        expr: sum by (job) (rate(http_server_request_duration_seconds_bucket{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events", le="0.5"}[30m]))
+      - record: job:devices_api_fast_requests:rate1h
+        expr: sum by (job) (rate(http_server_request_duration_seconds_bucket{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events", le="0.5"}[1h]))
+      - record: job:devices_api_fast_requests:rate6h
+        expr: sum by (job) (rate(http_server_request_duration_seconds_bucket{http_route=~"[A-Z]+ /v1/.+", http_route!="GET /v1/devices/events", le="0.5"}[6h]))
+
+      # Share of requests that failed (5xx) or were slower than 500 ms.
+      - record: job:devices_api_error_ratio:rate5m
+        expr: job:devices_api_errors:rate5m / job:devices_api_requests:rate5m
+      - record: job:devices_api_error_ratio:rate30m
+        expr: job:devices_api_errors:rate30m / job:devices_api_requests:rate30m
+      - record: job:devices_api_error_ratio:rate1h
+        expr: job:devices_api_errors:rate1h / job:devices_api_requests:rate1h
+      - record: job:devices_api_error_ratio:rate6h
+        expr: job:devices_api_errors:rate6h / job:devices_api_requests:rate6h
+      - record: job:devices_api_slow_ratio:rate5m
+        expr: 1 - job:devices_api_fast_requests:rate5m / job:devices_api_requests:rate5m
+      - record: job:devices_api_slow_ratio:rate30m
+        expr: 1 - job:devices_api_fast_requests:rate30m / job:devices_api_requests:rate30m
+      - record: job:devices_api_slow_ratio:rate1h
+        expr: 1 - job:devices_api_fast_requests:rate1h / job:devices_api_requests:rate1h
+      - record: job:devices_api_slow_ratio:rate6h
+        expr: 1 - job:devices_api_fast_requests:rate6h / job:devices_api_requests:rate6h
+
+  - name: devices-api-alerts
+    rules:
+      - alert: DevicesApiDown
+        expr: up{job="devices-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Devices API instance {{ $labels.instance }} cannot be scraped"
+          description: "Prometheus has not reached the /metrics endpoint for one minute."
+          runbook: "docs/observability.md#devicesapidown"
+
+      # 14.4x the allowed error rate spends 2% of a 30-day budget in an hour.
+      - alert: DevicesApiErrorBudgetBurnFast
+        expr: |
+          job:devices_api_error_ratio:rate1h > (14.4 * 0.001)
+          and job:devices_api_error_ratio:rate5m > (14.4 * 0.001)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Devices API is returning 5xx fast enough to exhaust the availability budget in about two days"
+          description: "{{ $value | humanizePercentage }} of API requests failed with 5xx over the last hour."
+          runbook: "docs/observability.md#devicesapierrorbudgetburn"
+
+      # 6x the allowed error rate spends 5% of a 30-day budget in six hours.
+      - alert: DevicesApiErrorBudgetBurnSlow
+        expr: |
+          job:devices_api_error_ratio:rate6h > (6 * 0.001)
+          and job:devices_api_error_ratio:rate30m > (6 * 0.001)
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Devices API keeps returning 5xx above the availability objective"
+          description: "{{ $value | humanizePercentage }} of API requests failed with 5xx over the last six hours."
+          runbook: "docs/observability.md#devicesapierrorbudgetburn"
+
+      - alert: DevicesApiLatencyBudgetBurn
+        expr: |
+          job:devices_api_slow_ratio:rate1h > (14.4 * 0.01)
+          and job:devices_api_slow_ratio:rate5m > (14.4 * 0.01)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Too many Devices API requests take longer than 500 ms"
+          description: "{{ $value | humanizePercentage }} of API requests were slower than 500 ms over the last hour."
+          runbook: "docs/observability.md#devicesapilatencybudgetburn"
+
+      - alert: DevicesApiDatabasePoolSaturated
+        expr: |
+          sum by (instance) (pgxpool_acquired_connections{job="devices-api"})
+            / sum by (instance) (pgxpool_max_connections{job="devices-api"}) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database pool of {{ $labels.instance }} is above 90% in use"
+          description: "Requests are about to wait for a free connection."
+          runbook: "docs/observability.md#devicesapidatabasepoolsaturated"
+
+      - alert: DevicesApiDatabaseSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le, instance) (
+            rate(db_client_operation_duration_seconds_bucket{job="devices-api", pgx_operation_type="query"}[5m])
+          )) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "95th percentile of database queries on {{ $labels.instance }} is above 100 ms"
+          description: "Current value: {{ $value | humanizeDuration }}."
+          runbook: "docs/observability.md#devicesapidatabaseslow"
+
+      - alert: DevicesApiInventoryUnavailable
+        expr: up{job="devices-api"} == 1 unless on (instance) count by (instance) (devices_inventory{job="devices-api"})
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Devices API instance {{ $labels.instance }} stopped reporting the device inventory"
+          description: "The count query behind devices_inventory is failing; the service log has a 'telemetry error' entry with the cause."
+          runbook: "docs/observability.md#devicesapiinventoryunavailable"
+
+      - alert: DevicesApiEventSubscribersDropped
+        expr: increase(devices_events_dropped_subscribers_total{job="devices-api"}[10m]) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "Event stream clients on {{ $labels.instance }} were disconnected for reading too slowly"
+          description: "{{ $value | humanize }} subscribers dropped in the last 10 minutes; they must reconnect and reconcile."
+          runbook: "docs/observability.md#devicesapieventsubscribersdropped"

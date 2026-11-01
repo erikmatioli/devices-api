@@ -96,6 +96,11 @@ load: ## Run the k6 smoke load test against the running stack (VUS, DURATION)
 postman: ## Run the Postman collection with Newman against the running stack
 	npx --yes newman@6.2.1 run postman/devices-api.postman_collection.json -e postman/local.postman_environment.json
 
+.PHONY: check-rules
+check-rules: ## Check and unit-test the Prometheus recording and alerting rules (needs Docker)
+	docker run --rm -v "$(CURDIR)/deploy/prometheus:/rules:ro" -w /rules --entrypoint promtool prom/prometheus:v3.0.1 check rules rules.yml
+	docker run --rm -v "$(CURDIR)/deploy/prometheus:/rules:ro" -w /rules --entrypoint promtool prom/prometheus:v3.0.1 test rules rules.test.yml
+
 .PHONY: up
 up: ## Build the images (API and tokengen) and start the API and PostgreSQL
 	docker compose --profile tools build

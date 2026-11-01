@@ -72,7 +72,8 @@ services:
     profiles: [observability]
     image: prom/prometheus:v3.0.1
     volumes:
-      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
 

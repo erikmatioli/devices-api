@@ -1,0 +1,89 @@
+# Unit tests for rules.yml: make check-rules
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an unreachable instance raises DevicesApiDown
+    interval: 1m
+    input_series:
+      - series: 'up{job="devices-api", instance="api:8080"}'
+        values: "0x5"
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: DevicesApiDown
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: DevicesApiDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: devices-api
+              instance: api:8080
+            exp_annotations:
+              summary: "Devices API instance api:8080 cannot be scraped"
+              description: "Prometheus has not reached the /metrics endpoint for one minute."
+              runbook: "docs/observability.md#devicesapidown"
+
+  - name: 10% of 5xx burns the availability budget fast
+    interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="devices-api", instance="api:8080", http_route="GET /v1/devices/{id}", http_response_status_code="200"}'
+        values: "0+90x80"
+      - series: 'http_server_request_duration_seconds_count{job="devices-api", instance="api:8080", http_route="GET /v1/devices/{id}", http_response_status_code="500"}'
+        values: "0+10x80"
+      # Probe and scrape traffic is outside the objective and must not dilute it.
+      - series: 'http_server_request_duration_seconds_count{job="devices-api", instance="api:8080", http_route="GET /healthz", http_response_status_code="200"}'
+        values: "0+10000x80"
+    promql_expr_test:
+      - expr: round(job:devices_api_error_ratio:rate5m, 0.001)
+        eval_time: 70m
+        exp_samples:
+          - labels: '{job="devices-api"}'
+            value: 0.1
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: DevicesApiErrorBudgetBurnFast
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: devices-api
+            exp_annotations:
+              summary: "Devices API is returning 5xx fast enough to exhaust the availability budget in about two days"
+              description: "10% of API requests failed with 5xx over the last hour."
+              runbook: "docs/observability.md#devicesapierrorbudgetburn"
+
+  - name: healthy traffic raises no budget alert
+    interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="devices-api", instance="api:8080", http_route="GET /v1/devices/{id}", http_response_status_code="200"}'
+        values: "0+1000x80"
+      - series: 'http_server_request_duration_seconds_count{job="devices-api", instance="api:8080", http_route="GET /v1/devices/{id}", http_response_status_code="500"}'
+        values: "0+1x80"
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: DevicesApiErrorBudgetBurnFast
+        exp_alerts: []
+
+  - name: a running instance without inventory raises DevicesApiInventoryUnavailable
+    interval: 1m
+    input_series:
+      - series: 'up{job="devices-api", instance="api:8080"}'
+        values: "1x10"
+      - series: 'up{job="devices-api", instance="api:8081"}'
+        values: "1x10"
+      - series: 'devices_inventory{job="devices-api", instance="api:8081", state="available"}'
+        values: "3x10"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: DevicesApiInventoryUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: devices-api
+              instance: api:8080
+            exp_annotations:
+              summary: "Devices API instance api:8080 stopped reporting the device inventory"
+              description: "The count query behind devices_inventory is failing; the service log has a 'telemetry error' entry with the cause."
+              runbook: "docs/observability.md#devicesapiinventoryunavailable"
