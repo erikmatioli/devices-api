@@ -46,10 +46,14 @@ Install Docker Engine following <https://docs.docker.com/engine/install/>.
 winget install GoLang.Go
 winget install GolangCI.golangci-lint
 winget install ezwinports.make
+winget install Git.Git
 winget install Docker.DockerDesktop
 ```
 
-Open a new terminal afterwards so the updated `PATH` is picked up. The race
+Open a new terminal afterwards so the updated `PATH` is picked up. The
+`Makefile` recipes are POSIX shell; on Windows they run with the `sh.exe`
+bundled with Git for Windows, so `make` works the same from PowerShell, cmd
+and Git Bash. The race
 detector (`-race`) needs cgo and a C compiler, so `make test` skips it on
 Windows; CI always runs with it.
 

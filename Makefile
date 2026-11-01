@@ -1,6 +1,18 @@
 # Developer entry points. Run `make help` to list them.
 
-APP       := devices-api
+# On Windows, make falls back to cmd.exe unless sh.exe is on PATH, and the
+# recipes below are POSIX shell. Use the shell bundled with Git for Windows so
+# they behave the same from PowerShell, cmd and Git Bash.
+ifeq ($(OS),Windows_NT)
+  GIT_CORE_DIR := $(shell git --exec-path)
+  ifneq ($(findstring /libexec/git-core,$(GIT_CORE_DIR)),)
+    SHELL := $(subst /clangarm64/libexec/git-core,/bin/sh.exe,$(subst /mingw64/libexec/git-core,/bin/sh.exe,$(GIT_CORE_DIR)))
+  endif
+  # Keep container paths such as -w /src from being rewritten to Windows paths.
+  export MSYS_NO_PATHCONV := 1
+endif
+
+APP      := devices-api
 BIN_DIR   := bin
 COVER     := coverage.out
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -23,7 +35,7 @@ export
 
 .PHONY: help
 help: ## List available targets
-	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
 
 .PHONY: build
 build: ## Compile the API binary into ./bin
