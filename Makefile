@@ -107,7 +107,7 @@ up: ## Build the images (API and tokengen) and start the API and PostgreSQL
 	docker compose up -d
 
 .PHONY: observability
-observability: ## Start the stack with the collector, Jaeger and Prometheus
+observability: ## Start the stack with the collector, Jaeger, Prometheus and Grafana
 	docker compose --profile tools build
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 docker compose --profile observability up -d
 
