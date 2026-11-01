@@ -195,13 +195,17 @@ restart.
 | Metrics | `GET /metrics` (Prometheus format), plus OTLP push when an endpoint is set |
 | Traces | OTLP/HTTP to `OTEL_EXPORTER_OTLP_ENDPOINT`; one span per request and per SQL statement |
 
-`make observability` starts the API with an OpenTelemetry Collector, Jaeger
-and Prometheus:
+`make observability` starts the API with an OpenTelemetry Collector, Jaeger,
+Prometheus and Grafana:
 
 | UI | URL |
 |---|---|
+| Grafana (dashboards) | <http://localhost:3000>, read-only without signing in |
 | Jaeger (traces) | <http://localhost:16686> (service `devices-api`) |
-| Prometheus (metrics) | <http://localhost:9090> |
+| Prometheus (metrics and alerts) | <http://localhost:9090> |
+
+The objectives, dashboards, indicators and alert runbooks are described in
+[`docs/observability.md`](docs/observability.md).
 
 Useful queries:
 
@@ -234,12 +238,13 @@ collector; they are only exported when an OTLP endpoint is configured.
 | `make tidy` | `go mod tidy` and `go mod verify` |
 | `make token` | Print a development access token (`SUB`, `SCOPE`, `TTL`) |
 | `make up` / `make down` | Start or stop the Compose stack |
-| `make observability` | Start the stack plus collector, Jaeger and Prometheus |
+| `make observability` | Start the stack plus collector, Jaeger, Prometheus and Grafana |
+| `make check-rules` | Validate and unit-test the Prometheus rules with `promtool` |
 | `make logs` | Follow API logs |
 | `make docker-build` | Build the image tagged with the git version |
 
-Before pushing, run `make fmt lint test-integration`. CI runs the same
-checks plus an image build.
+Before pushing, run `make fmt lint test-integration`, and `make check-rules`
+when `deploy/prometheus` changed. CI runs the same checks plus an image build.
 
 ### Tests
 
@@ -272,7 +277,7 @@ internal/platform/    configuration, logger and telemetry (OpenTelemetry, Promet
 internal/httpapi/     routes, middleware, request decoding, problem responses, docs
 internal/postgres/    pool, repositories, LISTEN loop and embedded SQL migrations
 api/openapi.yaml      API contract, embedded and served at /openapi.yaml and /docs
-deploy/               collector and Prometheus configuration for `make observability`
+deploy/               collector, Prometheus rules and Grafana dashboards for `make observability`
 test/load/            k6 smoke load test (`make load`)
 postman/              Postman collection and environment (`make postman`)
 docs/                 architecture, flows and delivery plan

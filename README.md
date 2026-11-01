@@ -44,6 +44,7 @@ is optional at runtime or lives outside the binary.
 | JWT scopes | Reading, writing and deleting are separate permissions | HS256 with a local secret; JWKS only when `AUTH_JWKS_URL` is set |
 | Event stream (SSE) | State changes must be announced only after they are persisted; `pg_notify` inside the update transaction guarantees that across replicas without a message broker | One listening connection per replica |
 | OpenTelemetry and Prometheus | Traces, metrics and trace-correlated logs for running it in production | OTLP export only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; the collector, Jaeger and Prometheus start only with `make observability` |
+| Dashboards, objectives and alerts | Shows whether the service meets its objectives and what to do when it does not | Files under `deploy/`, loaded only by `make observability`; the inventory gauge is one `GROUP BY` query per scrape |
 | k6, Postman collection, CI | Repeatable evidence that the behaviour holds | Outside the binary |
 
 The reasoning and the alternatives considered for each decision are recorded
@@ -224,8 +225,15 @@ considerably better.
   SQL statement, exported over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
   W3C `traceparent` from callers is honoured.
 
+- **Dashboards and alerts:** two Grafana dashboards (service overview with
+  the service level objectives; domain and dependencies with the device
+  inventory, database and runtime) and Prometheus alerts based on error-budget
+  burn rate, tested with `promtool`.
+
 `make observability` starts the API with an OpenTelemetry Collector, Jaeger
-(<http://localhost:16686>) and Prometheus (<http://localhost:9090>).
+(<http://localhost:16686>), Prometheus (<http://localhost:9090>) and Grafana
+(<http://localhost:3000>). [docs/observability.md](docs/observability.md)
+describes the objectives, every indicator and a runbook per alert.
 
 ## Configuration
 
@@ -260,7 +268,7 @@ internal/idempotency/ Idempotency-Key contract and in-memory store
 internal/events/      state change event and fan-out hub
 internal/platform/    configuration, logger, telemetry
 api/                  OpenAPI contract (embedded in the binary)
-deploy/               collector and Prometheus configuration
+deploy/               collector, Prometheus rules and Grafana dashboards
 test/load/            k6 smoke test
 postman/              Postman collection and local environment
 docs/                 architecture, flows, delivery plan
@@ -305,5 +313,6 @@ docs/                 architecture, flows, delivery plan
 | [`DEVELOPMENT.md`](DEVELOPMENT.md) | Setting up from scratch, configuration reference, daily commands, maintenance tasks, troubleshooting |
 | [`docs/architecture.md`](docs/architecture.md) | Components, layers, domain rules and decision records |
 | [`docs/flows.md`](docs/flows.md) | Sequence diagrams for every use case |
+| [`docs/observability.md`](docs/observability.md) | Service level objectives, dashboards, indicators and alert runbooks |
 | [`docs/delivery-plan.md`](docs/delivery-plan.md) | Phases, exit criteria and acceptance tracking |
 | [`api/openapi.yaml`](api/openapi.yaml) | OpenAPI 3.1 contract |
