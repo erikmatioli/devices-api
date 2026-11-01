@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/erikmatioli/devices-api/internal/app"
@@ -56,6 +57,11 @@ func run() error {
 
 	log := logger.New(cfg.Log, os.Stdout, version)
 	slog.SetDefault(log)
+	// Export and metric callback failures from OpenTelemetry are warnings in
+	// the service log rather than plain lines from the standard logger.
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		log.Warn("telemetry error", slog.Any("error", err))
+	}))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
