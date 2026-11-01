@@ -179,6 +179,27 @@ func (r *DeviceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return device.ErrNotFound
 }
 
+// CountByState returns the number of devices in each state. States without
+// devices are absent from the map.
+func (r *DeviceRepository) CountByState(ctx context.Context) (map[device.State]int64, error) {
+	rows, err := r.pool.Query(ctx, `SELECT state, count(*) FROM devices GROUP BY state`)
+	if err != nil {
+		return nil, fmt.Errorf("count devices by state: %w", err)
+	}
+	counts := make(map[device.State]int64, len(device.States))
+	var (
+		state string
+		n     int64
+	)
+	if _, err := pgx.ForEachRow(rows, []any{&state, &n}, func() error {
+		counts[device.State(state)] = n
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("count devices by state: %w", err)
+	}
+	return counts, nil
+}
+
 func scanDevice(row pgx.Row) (device.Device, error) {
 	var (
 		id           uuid.UUID

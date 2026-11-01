@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -18,6 +19,7 @@ const meterName = "github.com/erikmatioli/devices-api"
 // the application (app.Metrics), the HTTP layer (httpapi.Metrics) and the
 // event hub (events.Observer), so those packages stay free of OpenTelemetry.
 type Metrics struct {
+	meter              metric.Meter
 	requestDuration    metric.Float64Histogram
 	devicesCreated     metric.Int64Counter
 	devicesDeleted     metric.Int64Counter
@@ -31,7 +33,7 @@ type Metrics struct {
 func NewMetrics(mp metric.MeterProvider) (*Metrics, error) {
 	m := mp.Meter(meterName)
 	var (
-		out Metrics
+		out = Metrics{meter: m}
 		err error
 	)
 	if out.requestDuration, err = m.Float64Histogram("http.server.request.duration",
@@ -99,6 +101,37 @@ func (m *Metrics) DeviceStateChanged(ctx context.Context, from, to device.State)
 		attribute.String("from", string(from)),
 		attribute.String("to", string(to)),
 	))
+}
+
+// inventoryTimeout bounds the count query run on every collection.
+const inventoryTimeout = 2 * time.Second
+
+// CountByState returns the number of stored devices in each state.
+type CountByState func(context.Context) (map[device.State]int64, error)
+
+// ObserveInventory registers the devices.inventory gauge, which reports how
+// many devices are in each state when metrics are collected. Every state is
+// reported, with zero when no device is in it, so dashboards and alerts see
+// a complete series set.
+func (m *Metrics) ObserveInventory(count CountByState) error {
+	gauge, err := m.meter.Int64ObservableGauge("devices.inventory",
+		metric.WithUnit("{device}"), metric.WithDescription("Stored devices, by state."))
+	if err != nil {
+		return err
+	}
+	_, err = m.meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+		ctx, cancel := context.WithTimeout(ctx, inventoryTimeout)
+		defer cancel()
+		counts, err := count(ctx)
+		if err != nil {
+			return fmt.Errorf("observe device inventory: %w", err)
+		}
+		for _, s := range device.States {
+			o.ObserveInt64(gauge, counts[s], metric.WithAttributes(attribute.String("state", string(s))))
+		}
+		return nil
+	}, gauge)
+	return err
 }
 
 // SubscriberAdded implements events.Observer.

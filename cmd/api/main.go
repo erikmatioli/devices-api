@@ -112,7 +112,11 @@ func run() error {
 		log.Warn("access tokens are verified with a shared HS256 secret; use AUTH_JWKS_URL in production")
 	}
 
-	devices := app.NewService(postgres.NewDeviceRepository(pool), app.WithMetrics(metrics))
+	repo := postgres.NewDeviceRepository(pool)
+	devices := app.NewService(repo, app.WithMetrics(metrics))
+	if err := metrics.ObserveInventory(repo.CountByState); err != nil {
+		return fmt.Errorf("register inventory metric: %w", err)
+	}
 
 	idempotencyStore := postgres.NewIdempotencyStore(pool, cfg.Idempotency.TTL, cfg.Idempotency.LockTimeout)
 	go idempotencyStore.RunPurge(ctx, cfg.Idempotency.PurgeInterval, log)

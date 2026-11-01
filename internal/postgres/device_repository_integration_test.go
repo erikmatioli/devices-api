@@ -131,6 +131,33 @@ func TestList(t *testing.T) {
 	}
 }
 
+func TestCountByState(t *testing.T) {
+	resetDevices(t)
+	repo := postgres.NewDeviceRepository(testPool)
+	ctx := context.Background()
+
+	empty, err := repo.CountByState(ctx)
+	if err != nil {
+		t.Fatalf("CountByState: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("counts on an empty table = %v, want none", empty)
+	}
+
+	seed(t, repo, "d1", "Google", device.StateAvailable, 1*time.Minute)
+	seed(t, repo, "d2", "Apple", device.StateInUse, 2*time.Minute)
+	seed(t, repo, "d3", "Apple", device.StateInUse, 3*time.Minute)
+
+	got, err := repo.CountByState(ctx)
+	if err != nil {
+		t.Fatalf("CountByState: %v", err)
+	}
+	want := map[device.State]int64{device.StateAvailable: 1, device.StateInUse: 2}
+	if len(got) != len(want) || got[device.StateAvailable] != 1 || got[device.StateInUse] != 2 {
+		t.Errorf("counts = %v, want %v", got, want)
+	}
+}
+
 func TestListPagination(t *testing.T) {
 	resetDevices(t)
 	repo := postgres.NewDeviceRepository(testPool)

@@ -2,6 +2,7 @@ package telemetry_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -111,5 +112,46 @@ func TestMetricsAreExposed(t *testing.T) {
 	}
 	if !strings.Contains(out, `le="0.025"`) {
 		t.Error("request duration should use the semantic convention buckets")
+	}
+}
+
+func TestInventoryReportsEveryState(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	ctx := context.Background()
+	p, err := telemetry.Setup(ctx, "devices-api", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = p.Shutdown(ctx) }()
+	m, err := telemetry.NewMetrics(p.MeterProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fail := false
+	err = m.ObserveInventory(func(context.Context) (map[device.State]int64, error) {
+		if fail {
+			return nil, errors.New("database unavailable")
+		}
+		return map[device.State]int64{device.StateInUse: 3}, nil
+	})
+	if err != nil {
+		t.Fatalf("ObserveInventory: %v", err)
+	}
+
+	out := scrape(t, p.MetricsHandler)
+	for _, want := range []string{
+		`state="in-use"} 3`,
+		`state="available"} 0`,
+		`state="inactive"} 0`,
+	} {
+		if !strings.Contains(out, "devices_inventory{") || !strings.Contains(out, want) {
+			t.Errorf("metrics output lacks devices_inventory with %s", want)
+		}
+	}
+
+	fail = true
+	if out := scrape(t, p.MetricsHandler); strings.Contains(out, "devices_inventory{") {
+		t.Error("a failed count must not report stale or zero values")
 	}
 }
