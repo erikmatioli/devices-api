@@ -71,25 +71,93 @@ Requirements: Docker with Compose v2. Building from source also needs Go 1.26
 or newer and GNU Make (optional; on Windows it also needs Git for Windows,
 whose shell runs the `Makefile` recipes).
 
+Create the local settings once:
+
 ```bash
 cp .env.example .env
-make up                       # builds the images and starts PostgreSQL and the API
-curl http://localhost:8080/readyz
 ```
 
-Without `make`:
+Then start one of the two stacks. Both build the images first.
+
+**The API and PostgreSQL:**
+
+```bash
+make up
+```
+
+**The API, PostgreSQL and monitoring (Grafana, Prometheus and Jaeger):**
+
+```bash
+make observability
+```
+
+Without `make`, build the images and start the stack you want:
 
 ```bash
 docker compose --profile tools build
 docker compose up -d
 ```
 
+```bash
+docker compose --profile tools build
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 docker compose --profile observability up -d
+```
+
+Once it is up, these addresses are available:
+
+| Service | Address | Started by |
+|---|---|---|
+| API | <http://localhost:8080> | both commands |
+| Documentation (Swagger UI) | <http://localhost:8080/docs> | both commands |
+| Readiness check | <http://localhost:8080/readyz> | both commands |
+| Grafana | <http://localhost:3000> | `make observability` |
+| Prometheus | <http://localhost:9090> | `make observability` |
+| Jaeger | <http://localhost:16686> | `make observability` |
+
+To check that everything is running:
+
+```bash
+docker compose ps
+```
+
+To see data on the dashboards, generate traffic while the stack is up:
+
+```bash
+make load
+```
+
+To test the application, start by subscribing to the events, as described in
+[Using the API](#using-the-api). To try every endpoint, see
+[Postman and Newman](#postman-and-newman).
+
 Stop everything with `make down` (the database volume is kept).
 
 ## Using the API
 
-Every `/v1` endpoint needs a bearer token with the right scope. Mint a local
-one (signed with the development secret from `.env`):
+Every `/v1` endpoint needs a bearer token with the right scope. Local tokens
+are signed with the development secret from `.env`. Use two terminals: one
+stays subscribed to the events and the other sends the requests.
+
+### Step 1: subscribe to the events
+
+**Do this first. A client that is not subscribed is not notified.** Events go
+only to the clients connected when the change happens. They are not stored, so
+a client that subscribes later never receives the earlier ones.
+
+In a separate terminal, mint a token and leave this command running:
+
+```bash
+TOKEN=$(docker compose run --rm tokengen)          # or: TOKEN=$(make -s token)
+curl -N -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/devices/events
+```
+
+The stream answers `retry: 3000` and stays open, sending a keep-alive comment
+every 15 seconds. To follow a single device, add `?device_id=<id>` to the URL.
+
+### Step 2: change a device
+
+In the other terminal, mint a token (variables are not shared between
+terminals):
 
 ```bash
 TOKEN=$(docker compose run --rm tokengen)          # or: TOKEN=$(make -s token)
@@ -112,13 +180,18 @@ curl -s -X PATCH -H "$AUTH" -H "Content-Type: application/merge-patch+json" \
      http://localhost:8080/v1/devices/<id>
 ```
 
-Follow state changes in another terminal:
+### Step 3: see the notification
 
-```bash
-curl -N -H "$AUTH" http://localhost:8080/v1/devices/events
-# event: device.state_changed
-# data: {"event_id":"…","device_id":"…","previous_state":"available","new_state":"in-use","occurred_at":"…"}
+The `PATCH` changed the state, so the event appears in the subscribed terminal:
+
 ```
+id: <event id>
+event: device.state_changed
+data: {"event_id":"…","device_id":"…","previous_state":"available","new_state":"in-use","occurred_at":"…"}
+```
+
+Only a state change produces an event. Creating or deleting a device, changing
+its name or brand, and updates that change nothing do not.
 
 ### Endpoints
 
@@ -136,12 +209,53 @@ curl -N -H "$AUTH" http://localhost:8080/v1/devices/events
 
 Common to all `/v1` routes: `401` without a valid token, `403` without the
 scope, `400` for malformed JSON, `413` above 1 MB, `415` for other content
-types. A Postman collection that walks through every endpoint, with assertions
-and automatic tokens, is in [`postman/`](postman/README.md).
+types.
 
 The full contract, with schemas and examples, is in
 [`api/openapi.yaml`](api/openapi.yaml) and at <http://localhost:8080/docs>
 (use **Authorize** with the token).
+
+### Postman and Newman
+
+The [`postman/`](postman/README.md) folder has what is needed to test a local
+stack and to inspect each call: the exact method, URL, headers and body of
+every request, and the checks made on its response.
+
+| File | Content |
+|---|---|
+| `devices-api.postman_collection.json` | Every endpoint as an ordered flow (41 requests, 145 assertions), with tokens minted automatically |
+| `local.postman_environment.json` | The local address and token settings, matching `.env.example` |
+
+To run it in Postman:
+
+1. Start the stack with `make up`.
+2. **Import** both files.
+3. Select the **Devices API · local** environment.
+4. To see the notifications, first send **04 · Event stream (manual) → Stream
+   state changes (SSE)** on its own and leave it open, or subscribe in a
+   terminal as in [Step 1](#step-1-subscribe-to-the-events). Collection runs
+   skip this request because a stream never ends.
+5. Open the collection and choose **Run**, keeping the default order, because
+   requests pass ids and ETags to the next ones.
+
+After a full run, any request can be sent on its own.
+
+To run the same collection from the command line with Newman (Node.js
+required):
+
+```bash
+make postman
+```
+
+Without `make`:
+
+```bash
+npx --yes newman@6.2.1 run postman/devices-api.postman_collection.json -e postman/local.postman_environment.json
+```
+
+The exit code is non-zero if any assertion fails. The folder's
+[README](postman/README.md) describes what each part of the collection checks
+and how to watch the event stream.
 
 ### Behaviour worth knowing
 
